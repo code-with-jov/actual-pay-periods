@@ -10,7 +10,8 @@ export type FeatureFlag =
   | 'enableBanking'
   | 'sankeyReport'
   | 'akahuBankSync'
-  | 'mobileCalculator';
+  | 'mobileCalculator'
+  | 'payPeriodsEnabled';
 
 /**
  * Cross-device preferences. These sync across devices when they are changed.
@@ -56,7 +57,10 @@ export type SyncedPrefs = Partial<
     | `flip-amount-${string}-${'csv' | 'qif'}`
     | `flags.${FeatureFlag}`
     | `learn-categories`
-    | `show-hidden-tags`,
+    | `show-hidden-tags`
+    | 'showPayPeriods'
+    | 'payPeriodFrequency'
+    | 'payPeriodStartDate',
     string
   >
 >;

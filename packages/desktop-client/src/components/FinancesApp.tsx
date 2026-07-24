@@ -17,6 +17,7 @@ import { useGlobalPref } from '#hooks/useGlobalPref';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useMetaThemeColor } from '#hooks/useMetaThemeColor';
 import { useNavigate } from '#hooks/useNavigate';
+import { usePayPeriodConfigSync } from '#hooks/usePayPeriodConfig';
 import { ScrollProvider } from '#hooks/useScrollListener';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch, useSelector } from '#redux';
@@ -90,6 +91,7 @@ function RouterBehaviors() {
 export function FinancesApp() {
   const { isNarrowWidth } = useResponsive();
   useMetaThemeColor(theme.mobileViewTheme);
+  usePayPeriodConfigSync();
 
   const location = useLocation();
   const dispatch = useDispatch();

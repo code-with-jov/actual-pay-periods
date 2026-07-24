@@ -3,11 +3,35 @@ import * as d from 'date-fns';
 import type { Locale } from 'date-fns';
 
 import { memoizeOne } from '#shared/memoize';
+import { getPayPeriodConfig } from '#shared/pay-period-config';
+import { addPayPeriods, generatePayPeriods, getPayPeriodBounds, getPayPeriodForDate, getPayPeriodLabel, isPayPeriod, nextPayPeriod, payPeriodRangeInclusive, prevPayPeriod } from '#shared/pay-periods';
+import type { PayPeriodConfig } from '#shared/pay-periods';
 import * as Platform from '#shared/platform';
 import type { SyncedPrefs } from '#types/prefs';
 
 type DateLike = string | Date;
 type Day = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+// Pay period IDs ('YYYY-MM' with MM 13-99) flow through the same code
+// paths as calendar month IDs. Resolving one requires the active config
+// from the registry (see pay-period-config.ts); using a pay period ID
+// while no config is active is a lifecycle bug that must fail loudly —
+// silently treating '2026-13' as a date would produce January 2027.
+function requirePayPeriodConfig(id: string): PayPeriodConfig {
+  const config = getPayPeriodConfig();
+  if (!config) {
+    throw new Error(
+      `Pay period '${id}' was used while no pay period configuration is active. ` +
+        'Pay period IDs should only exist while pay periods are enabled for the ' +
+        'open budget (see setPayPeriodConfig in shared/pay-period-config.ts).',
+    );
+  }
+  return config;
+}
+
+function isPayPeriodValue(value: DateLike): value is string {
+  return typeof value === 'string' && isPayPeriod(value);
+}
 
 export function _parse(value: DateLike): Date {
   if (typeof value === 'string') {
@@ -65,6 +89,13 @@ export function _parse(value: DateLike): Date {
     // shifted backwards or forwards, doing date logic will stay
     // within the day we want.
 
+    if (isPayPeriod(value)) {
+      const config = requirePayPeriodConfig(value);
+      const { startDate } = getPayPeriodBounds(value, config);
+      const [py, pm, pd] = startDate.split('-').map(Number);
+      return new Date(py, pm - 1, pd, 12);
+    }
+
     const [year, month, day] = value.split('-');
     if (day != null) {
       return new Date(parseInt(year), parseInt(month) - 1, parseInt(day), 12);
@@ -88,6 +119,21 @@ export function yearFromDate(date: DateLike): string {
 
 export function monthFromDate(date: DateLike): string {
   return d.format(_parse(date), 'yyyy-MM');
+}
+
+/**
+ * The budget column owning the given date: its pay period when pay
+ * periods are active (year-boundary safe — a January date may belong to
+ * the prior year's last period), otherwise its calendar month. Use this
+ * for budget routing; use `monthFromDate` for calendar semantics
+ * (reports, imports), which stay calendar-based by design.
+ */
+export function budgetMonthFromDate(date: DateLike): string {
+  const config = getPayPeriodConfig();
+  if (config) {
+    return getPayPeriodForDate(_parse(date), config);
+  }
+  return monthFromDate(date);
 }
 
 export function isValidYearMonth(value: string): boolean {
@@ -140,6 +186,19 @@ export function currentMonth(): string {
   }
 }
 
+/**
+ * The budget column for "now": the current pay period when pay periods
+ * are active, otherwise the current calendar month. The budget engine and
+ * budget UI navigation should use this instead of `currentMonth`.
+ */
+export function currentBudgetMonth(): string {
+  const config = getPayPeriodConfig();
+  if (config) {
+    return getPayPeriodForDate(currentDate(), config);
+  }
+  return currentMonth();
+}
+
 export function currentWeek(
   firstDayOfWeekIdx?: SyncedPrefs['firstDayOfWeekIdx'],
 ): string {
@@ -179,6 +238,9 @@ export function currentDay(): string {
 }
 
 export function nextMonth(month: DateLike): string {
+  if (isPayPeriodValue(month)) {
+    return nextPayPeriod(month, requirePayPeriodConfig(month));
+  }
   return d.format(d.addMonths(_parse(month), 1), 'yyyy-MM');
 }
 
@@ -187,6 +249,9 @@ export function prevYear(month: DateLike, format = 'yyyy-MM'): string {
 }
 
 export function prevMonth(month: DateLike): string {
+  if (isPayPeriodValue(month)) {
+    return prevPayPeriod(month, requirePayPeriodConfig(month));
+  }
   return d.format(d.subMonths(_parse(month), 1), 'yyyy-MM');
 }
 
@@ -195,6 +260,9 @@ export function addYears(year: DateLike, n: number): string {
 }
 
 export function addMonths(month: DateLike, n: number): string {
+  if (isPayPeriodValue(month)) {
+    return addPayPeriods(month, n, requirePayPeriodConfig(month));
+  }
   return d.format(d.addMonths(_parse(month), n), 'yyyy-MM');
 }
 
@@ -217,6 +285,9 @@ export function differenceInCalendarDays(
 }
 
 export function subMonths(month: string | Date, n: number) {
+  if (isPayPeriodValue(month)) {
+    return addPayPeriods(month, -n, requirePayPeriodConfig(month));
+  }
   return d.format(d.subMonths(_parse(month), n), 'yyyy-MM');
 }
 
@@ -245,7 +316,28 @@ export function isAfter(month1: DateLike, month2: DateLike): boolean {
 }
 
 export function isCurrentMonth(month: DateLike): boolean {
-  return month === currentMonth();
+  const current = isPayPeriodValue(month)
+    ? currentBudgetMonth()
+    : currentMonth();
+  return month === current;
+}
+
+/**
+ * Sanitizes a persisted budget start month (the `budget.startMonth` local
+ * pref) against the active mode: a stored pay period ID is only valid
+ * while pay periods are active, and vice versa. Returns `fallback`
+ * (typically `currentBudgetMonth()`) when the stored value belongs to the
+ * other mode — e.g. right after toggling pay periods on or off.
+ */
+export function resolveStartMonth(
+  stored: string | undefined,
+  fallback: string,
+): string {
+  if (!stored) {
+    return fallback;
+  }
+  const active = getPayPeriodConfig() != null;
+  return isPayPeriod(stored) === active ? stored : fallback;
 }
 
 export function isCurrentDay(day: DateLike): boolean {
@@ -255,6 +347,16 @@ export function isCurrentDay(day: DateLike): boolean {
 // TODO: This doesn't really fit in this module anymore, should
 // probably live elsewhere
 export function bounds(month: DateLike): { start: number; end: number } {
+  if (isPayPeriodValue(month)) {
+    const { startDate, endDate } = getPayPeriodBounds(
+      month,
+      requirePayPeriodConfig(month),
+    );
+    return {
+      start: parseInt(startDate.replaceAll('-', ''), 10),
+      end: parseInt(endDate.replaceAll('-', ''), 10),
+    };
+  }
   return {
     start: parseInt(d.format(d.startOfMonth(_parse(month)), 'yyyyMMdd')),
     end: parseInt(d.format(d.endOfMonth(_parse(month)), 'yyyyMMdd')),
@@ -319,6 +421,19 @@ export function _range(
   end: DateLike,
   inclusive = false,
 ): string[] {
+  const startIsPeriod = isPayPeriodValue(start);
+  const endIsPeriod = isPayPeriodValue(end);
+  if (startIsPeriod !== endIsPeriod) {
+    throw new Error(
+      `Cannot create a range mixing a calendar month and a pay period ('${start}' to '${end}')`,
+    );
+  }
+  if (startIsPeriod && endIsPeriod) {
+    const config = requirePayPeriodConfig(start);
+    const range = payPeriodRangeInclusive(start, end, config);
+    return inclusive ? range : range.slice(0, -1);
+  }
+
   const months: string[] = [];
   let month = monthFromDate(start);
   const endMonth = monthFromDate(end);
@@ -406,10 +521,18 @@ export function getWeekEnd(
 }
 
 export function getYearStart(month: string): string {
+  if (isPayPeriod(month)) {
+    return getYear(month) + '-13';
+  }
   return getYear(month) + '-01';
 }
 
 export function getYearEnd(month: string): string {
+  if (isPayPeriod(month)) {
+    const config = requirePayPeriodConfig(month);
+    const periods = generatePayPeriods(Number(getYear(month)), config);
+    return periods[periods.length - 1].monthId;
+  }
   return getYear(month) + '-12';
 }
 
@@ -418,6 +541,14 @@ export function sheetForMonth(month: string): string {
 }
 
 export function nameForMonth(month: DateLike, locale?: Locale): string {
+  if (isPayPeriodValue(month)) {
+    return getPayPeriodLabel(
+      month,
+      requirePayPeriodConfig(month),
+      'summary',
+      locale,
+    );
+  }
   return d.format(_parse(month), "MMMM ''yy", { locale });
 }
 
