@@ -56,7 +56,10 @@ export function validatePayPeriodConfig(raw: {
   startDate?: string;
 }): PayPeriodConfig | null {
   const { payFrequency, startDate } = raw;
-  if (!payFrequency || !PAY_FREQUENCIES.includes(payFrequency as PayFrequency)) {
+  if (
+    !payFrequency ||
+    !PAY_FREQUENCIES.includes(payFrequency as PayFrequency)
+  ) {
     return null;
   }
   if (!startDate || !DATE_REGEX.test(startDate)) {
@@ -136,8 +139,7 @@ function generateMonthlyPeriods(
   const periods: Array<{ start: Date; end: Date }> = [];
   for (let m = 0; m < 12; m++) {
     const start = startFor(year, m);
-    const nextStart =
-      m === 11 ? startFor(year + 1, 0) : startFor(year, m + 1);
+    const nextStart = m === 11 ? startFor(year + 1, 0) : startFor(year, m + 1);
     periods.push({ start, end: d.subDays(nextStart, 1) });
   }
   return periods;
@@ -181,6 +183,7 @@ export function generatePayPeriods(
       rawPeriods = generateCyclePeriods(year, refDate, 14);
       break;
     case 'monthly':
+    default:
       rawPeriods = generateMonthlyPeriods(year, refDate);
       break;
   }
@@ -271,10 +274,14 @@ export function getPayPeriodForDate(
  * The period after `monthId`, wrapping from a year's last period to
  * `${year + 1}-13`.
  */
-export function nextPayPeriod(monthId: string, config: PayPeriodConfig): string {
+export function nextPayPeriod(
+  monthId: string,
+  config: PayPeriodConfig,
+): string {
   const year = Number(monthId.slice(0, 4));
   const mm = Number(monthId.slice(5, 7));
-  const lastMm = FIRST_PERIOD_NUMBER + generatePayPeriods(year, config).length - 1;
+  const lastMm =
+    FIRST_PERIOD_NUMBER + generatePayPeriods(year, config).length - 1;
 
   if (mm < lastMm) {
     return `${year}-${String(mm + 1).padStart(2, '0')}`;
@@ -286,7 +293,10 @@ export function nextPayPeriod(monthId: string, config: PayPeriodConfig): string 
  * The period before `monthId`, wrapping from `${year}-13` to the previous
  * year's last period.
  */
-export function prevPayPeriod(monthId: string, config: PayPeriodConfig): string {
+export function prevPayPeriod(
+  monthId: string,
+  config: PayPeriodConfig,
+): string {
   const year = Number(monthId.slice(0, 4));
   const mm = Number(monthId.slice(5, 7));
 

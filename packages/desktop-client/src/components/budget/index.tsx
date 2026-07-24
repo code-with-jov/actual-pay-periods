@@ -6,6 +6,7 @@ import { styles } from '@actual-app/components/styles';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
+import { getPayPeriodDateFilter } from '@actual-app/core/shared/pay-periods';
 import type {
   CategoryEntity,
   CategoryGroupEntity,
@@ -25,6 +26,7 @@ import { useCategories } from '#hooks/useCategories';
 import { useGlobalPref } from '#hooks/useGlobalPref';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useNavigate } from '#hooks/useNavigate';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useSpreadsheet } from '#hooks/useSpreadsheet';
 import { useSyncedPref } from '#hooks/useSyncedPref';
@@ -37,14 +39,18 @@ import { TrackingBudgetProvider } from './tracking/TrackingBudgetContext';
 import { prewarmAllMonths, prewarmMonth } from './util';
 
 export function Budget() {
-  const currentMonth = monthUtils.currentMonth();
+  const payPeriodConfig = usePayPeriodConfig();
+  const currentMonth = monthUtils.currentBudgetMonth();
   const spreadsheet = useSpreadsheet();
   const navigate = useNavigate();
   const [summaryCollapsed, setSummaryCollapsedPref] = useLocalPref(
     'budget.summaryCollapsed',
   );
   const [startMonthPref, setStartMonthPref] = useLocalPref('budget.startMonth');
-  const startMonth = startMonthPref || currentMonth;
+  // A stored start month from the other mode (e.g. a calendar month while
+  // pay periods are active, or vice versa) must not leak into month math —
+  // mixing the two kinds produces broken ranges.
+  const startMonth = monthUtils.resolveStartMonth(startMonthPref, currentMonth);
   const [bounds, setBounds] = useState({
     start: startMonth,
     end: startMonth,
@@ -131,15 +137,37 @@ export function Budget() {
   };
 
   const onShowActivity = (categoryId, month) => {
+    // Pay periods don't line up with calendar months, so filter by the
+    // period's actual day range instead of the `month` shorthand.
+    const dateFilter = getPayPeriodDateFilter(month, payPeriodConfig);
+    const dateConditions =
+      '$gte' in dateFilter
+        ? [
+            {
+              field: 'date',
+              op: 'gte',
+              value: dateFilter.$gte,
+              type: 'date',
+            },
+            {
+              field: 'date',
+              op: 'lte',
+              value: dateFilter.$lte,
+              type: 'date',
+            },
+          ]
+        : [
+            {
+              field: 'date',
+              op: 'is',
+              value: month,
+              options: { month: true },
+              type: 'date',
+            },
+          ];
     const filterConditions = [
       { field: 'category', op: 'is', value: categoryId, type: 'id' },
-      {
-        field: 'date',
-        op: 'is',
-        value: month,
-        options: { month: true },
-        type: 'date',
-      },
+      ...dateConditions,
     ];
     void navigate('/accounts', {
       state: {

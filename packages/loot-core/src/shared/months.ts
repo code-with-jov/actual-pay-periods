@@ -4,7 +4,17 @@ import type { Locale } from 'date-fns';
 
 import { memoizeOne } from '#shared/memoize';
 import { getPayPeriodConfig } from '#shared/pay-period-config';
-import { addPayPeriods, generatePayPeriods, getPayPeriodBounds, getPayPeriodForDate, getPayPeriodLabel, isPayPeriod, nextPayPeriod, payPeriodRangeInclusive, prevPayPeriod } from '#shared/pay-periods';
+import {
+  addPayPeriods,
+  generatePayPeriods,
+  getPayPeriodBounds,
+  getPayPeriodForDate,
+  getPayPeriodLabel,
+  isPayPeriod,
+  nextPayPeriod,
+  payPeriodRangeInclusive,
+  prevPayPeriod,
+} from '#shared/pay-periods';
 import type { PayPeriodConfig } from '#shared/pay-periods';
 import * as Platform from '#shared/platform';
 import type { SyncedPrefs } from '#types/prefs';
@@ -425,7 +435,7 @@ export function _range(
   const endIsPeriod = isPayPeriodValue(end);
   if (startIsPeriod !== endIsPeriod) {
     throw new Error(
-      `Cannot create a range mixing a calendar month and a pay period ('${start}' to '${end}')`,
+      `Cannot create a range mixing a calendar month and a pay period ('${String(start)}' to '${String(end)}')`,
     );
   }
   if (startIsPeriod && endIsPeriod) {

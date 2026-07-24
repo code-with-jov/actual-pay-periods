@@ -889,7 +889,9 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
                       categoryGroups,
                       showHiddenCategories,
                       showNoneOption: true,
-                      month: monthUtils.monthFromDate(
+                      // The budget column owning the transaction date —
+                      // its pay period when pay periods are active.
+                      month: monthUtils.budgetMonthFromDate(
                         unserializedTransaction.date,
                       ),
                       onSelect: categoryId => {

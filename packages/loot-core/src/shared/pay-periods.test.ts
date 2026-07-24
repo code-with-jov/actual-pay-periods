@@ -10,8 +10,8 @@ import {
   payPeriodRangeInclusive,
   prevPayPeriod,
   validatePayPeriodConfig,
-  type PayPeriodConfig,
 } from './pay-periods';
+import type { PayPeriodConfig } from './pay-periods';
 
 const biweekly: PayPeriodConfig = {
   payFrequency: 'biweekly',
@@ -71,9 +71,7 @@ describe('validatePayPeriodConfig', () => {
     expect(
       validatePayPeriodConfig({ payFrequency: 'weekly', startDate: '' }),
     ).toBeNull();
-    expect(
-      validatePayPeriodConfig({ payFrequency: 'weekly' }),
-    ).toBeNull();
+    expect(validatePayPeriodConfig({ payFrequency: 'weekly' })).toBeNull();
     expect(
       validatePayPeriodConfig({
         payFrequency: 'weekly',
@@ -207,7 +205,7 @@ describe('getPayPeriodForDate', () => {
     expect(getPayPeriodForDate(day('2024-01-19'), biweekly)).toBe('2024-14');
   });
 
-  it('routes early-January dates to the prior year’s last period', () => {
+  it("routes early-January dates to the prior year's last period", () => {
     const periods2024 = generatePayPeriods(2024, biweekly);
     const last2024 = periods2024[periods2024.length - 1];
     // The last 2024 period extends into January 2025.
@@ -222,7 +220,7 @@ describe('getPayPeriodForDate', () => {
 
   it('covers every day of the year exactly once', () => {
     for (const config of [biweekly, monthly]) {
-      let cursor = day('2024-01-01');
+      const cursor = day('2024-01-01');
       const end = day('2024-12-31');
       let previous: string | null = null;
       while (cursor <= end) {
@@ -275,21 +273,19 @@ describe('period navigation', () => {
     expect(range[0]).toBe('2024-13');
     expect(range[range.length - 1]).toBe('2025-14');
     expect(range).toHaveLength(count2024 + 2);
-    expect(payPeriodRangeInclusive('2024-14', '2024-13', biweekly)).toEqual(
-      [],
-    );
+    expect(payPeriodRangeInclusive('2024-14', '2024-13', biweekly)).toEqual([]);
   });
 });
 
 describe('getPayPeriodBounds', () => {
-  it('returns the period’s day range', () => {
+  it("returns the period's day range", () => {
     expect(getPayPeriodBounds('2024-13', biweekly)).toEqual({
       startDate: '2024-01-05',
       endDate: '2024-01-18',
     });
   });
 
-  it('throws for IDs beyond the year’s period count', () => {
+  it("throws for IDs beyond the year's period count", () => {
     expect(() => getPayPeriodBounds('2024-40', monthly)).toThrow(
       /does not exist/,
     );
