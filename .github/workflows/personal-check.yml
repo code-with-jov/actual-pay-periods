@@ -90,6 +90,13 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          # check-migrations.ts compares against `origin/master`. Upstream gets
+          # away with the default depth-1 clone because their PRs target master,
+          # so the base tip is a parent of the PR merge commit and merge-base
+          # resolves inside the shallow graph. PRs here target `develop`, where
+          # master is unrelated in a shallow clone and `git merge-base
+          # origin/master HEAD` exits 1. Full history is the reliable fix.
+          fetch-depth: 0
       - name: Set up environment
         uses: ./.github/actions/setup
         with:
