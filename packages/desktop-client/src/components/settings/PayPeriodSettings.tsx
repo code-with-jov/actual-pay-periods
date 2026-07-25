@@ -6,7 +6,6 @@ import { Select } from '@actual-app/components/select';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
-import { send } from '@actual-app/core/platform/client/connection';
 import { validatePayPeriodConfig } from '@actual-app/core/shared/pay-periods';
 import type { PayFrequency } from '@actual-app/core/shared/pay-periods';
 
@@ -35,12 +34,11 @@ export function PayPeriodSettings() {
     ['monthly', t('Monthly')],
   ];
 
-  const onToggle = async () => {
+  const onToggle = () => {
+    // Saving the pref is enough: the server rebuilds the budget sheets
+    // whenever the active pay period configuration changes (see
+    // loot-core server/budget/pay-period-config.ts).
     setShowPayPeriods(isEnabled ? 'false' : 'true');
-
-    // The budget sheets are computed per budget column; switching between
-    // calendar months and pay periods must recalculate them.
-    await send('reset-budget-cache');
   };
 
   return (
