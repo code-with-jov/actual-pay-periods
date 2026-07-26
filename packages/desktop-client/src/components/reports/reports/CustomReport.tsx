@@ -62,6 +62,7 @@ import { useLocale } from '#hooks/useLocale';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useNavigate } from '#hooks/useNavigate';
 import { usePayees } from '#hooks/usePayees';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { useReport as useCustomReport } from '#hooks/useReport';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { useSyncedPref } from '#hooks/useSyncedPref';
@@ -495,12 +496,18 @@ function CustomReportInner({
   const sortByOp: sortByOpType = sortBy || 'desc';
   const { data: payees = [] } = usePayees();
   const { data: accounts = [] } = useAccounts();
+  const payPeriodConfig = usePayPeriodConfig();
 
   const hasWarning = calculateHasWarning(conditions, {
     categories: categories.list,
     payees,
     accounts,
   });
+
+  // The "Budgeted" balance type reads budgeted amounts per calendar month,
+  // and those columns don't exist while the budget is kept in pay periods.
+  const isBudgetDataUnavailable =
+    balanceTypeOp === 'totalBudgeted' && payPeriodConfig != null;
 
   useEffect(() => {
     if (balanceTypeOp !== 'totalBudgeted') {
@@ -1004,6 +1011,13 @@ function CustomReportInner({
                 </Warning>
               )}
             </View>
+          )}
+          {isBudgetDataUnavailable && (
+            <Warning style={{ paddingTop: 5, paddingBottom: 5 }}>
+              {t(
+                "Budgeted amounts aren't available while you budget by pay period, so this report has no data to show. Choose a different balance type to see this report.",
+              )}
+            </Warning>
           )}
           <View
             id="custom-report-content"

@@ -27,6 +27,7 @@ import { FinancialText } from '#components/FinancialText';
 import { MobileBackButton } from '#components/mobile/MobileBackButton';
 import { MobilePageHeader, Page, PageHeader } from '#components/Page';
 import { PrivacyFilter } from '#components/PrivacyFilter';
+import { BudgetDataUnavailable } from '#components/reports/BudgetDataUnavailable';
 import { Change } from '#components/reports/Change';
 import { BudgetAnalysisGraph } from '#components/reports/graphs/BudgetAnalysisGraph';
 import { Header } from '#components/reports/Header';
@@ -40,6 +41,7 @@ import { useDashboardWidget } from '#hooks/useDashboardWidget';
 import { useFormat } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { useNavigate } from '#hooks/useNavigate';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 import { addNotification } from '#notifications/notificationsSlice';
@@ -144,6 +146,9 @@ function BudgetAnalysisInternal({ widget }: BudgetAnalysisInternalProps) {
   const dispatch = useDispatch();
   const { t } = useTranslation();
   const format = useFormat();
+  // Budgeted amounts are kept per pay period rather than per calendar
+  // month, which is what this report charts.
+  const isBudgetDataUnavailable = usePayPeriodConfig() != null;
 
   const {
     conditions,
@@ -345,6 +350,10 @@ function BudgetAnalysisInternal({ widget }: BudgetAnalysisInternalProps) {
       t('Export budget analysis'),
     );
   };
+
+  if (isBudgetDataUnavailable) {
+    return <BudgetDataUnavailable />;
+  }
 
   if (!data || !allMonths) {
     return <LoadingIndicator />;

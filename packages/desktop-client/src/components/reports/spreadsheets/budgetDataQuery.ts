@@ -1,5 +1,6 @@
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
+import { payPeriodsActive } from '@actual-app/core/shared/pay-period-config';
 import type { Handlers } from '@actual-app/core/types/handlers';
 import type {
   CategoryEntity,
@@ -206,6 +207,15 @@ export async function fetchBudgetData({
     conditions,
     conditionsOp,
   );
+
+  // Budgeted amounts live in pay period columns while pay periods are
+  // active, so the calendar months below have no budget to report. Asking
+  // for them anyway wouldn't just return empty values — the spreadsheet
+  // creates a placeholder cell for every month it is asked about — so bail
+  // out instead. Callers render `BudgetDataUnavailable` for this case.
+  if (payPeriodsActive()) {
+    return { assets: [], debts: [] };
+  }
 
   const months = monthUtils.rangeInclusive(
     monthUtils.getMonth(startDate),

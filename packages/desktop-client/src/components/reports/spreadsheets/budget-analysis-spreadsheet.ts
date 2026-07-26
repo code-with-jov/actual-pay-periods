@@ -1,6 +1,7 @@
 // @ts-strict-ignore
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
+import { payPeriodsActive } from '@actual-app/core/shared/pay-period-config';
 import type {
   CategoryEntity,
   RuleConditionEntity,
@@ -54,6 +55,15 @@ export function createBudgetAnalysisSpreadsheet({
     spreadsheet: ReturnType<typeof useSpreadsheet>,
     setData: (data: BudgetAnalysisData) => void,
   ) => {
+    // This report reads budgeted amounts per calendar month, and those
+    // columns don't exist while the budget is kept in pay periods. Asking
+    // for them would report zeros and leave a placeholder cell behind for
+    // every month, so leave the data unset — the report renders
+    // `BudgetDataUnavailable` in this case.
+    if (payPeriodsActive()) {
+      return;
+    }
+
     // Get all categories
     const { list: allCategories, grouped: allCategoryGroups } =
       await send('get-categories');

@@ -111,6 +111,7 @@ const sidebars = {
           },
           items: [
             'budgeting/categories',
+            'budgeting/pay-periods',
             'budgeting/returns-and-reimbursements',
             {
               type: 'category',
