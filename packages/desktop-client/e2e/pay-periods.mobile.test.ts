@@ -36,17 +36,13 @@ async function configureAndEnablePayPeriods(page: Page) {
     name: 'Budget by pay period',
   });
   await expect(checkbox).toBeEnabled();
-  // Clicks on the settings checkboxes can race a re-render and get lost,
-  // but a click that did land resolves slowly — the synced pref (and so
-  // the checkbox) only updates once the server has rebuilt every budget
-  // sheet for the new mode. So lost clicks are retried, with an inner
-  // wait long enough to never double-click during an in-flight save.
-  await expect(async () => {
-    if (!(await checkbox.isChecked())) {
-      await checkbox.click();
-    }
-    await expect(checkbox).toBeChecked({ timeout: 20000 });
-  }).toPass({ timeout: 120000 });
+
+  // The control is disabled for as long as the save is in flight — the
+  // server cold-builds every budget column for the new mode before the
+  // pref save resolves — so one click is enough; wait for it to come back.
+  await checkbox.click();
+  await expect(checkbox).toBeChecked({ timeout: 60000 });
+  await expect(checkbox).toBeEnabled({ timeout: 60000 });
 }
 
 async function goToAdjacentPeriod(

@@ -2,6 +2,7 @@
 import React, { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import type { ComponentType } from 'react';
 
+import { AnimatedLoading } from '@actual-app/components/icons/AnimatedLoading';
 import { styles } from '@actual-app/components/styles';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
@@ -26,7 +27,10 @@ import { useCategories } from '#hooks/useCategories';
 import { useGlobalPref } from '#hooks/useGlobalPref';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useNavigate } from '#hooks/useNavigate';
-import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
+import {
+  payPeriodConfigKey,
+  usePayPeriodConfig,
+} from '#hooks/usePayPeriodConfig';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useSpreadsheet } from '#hooks/useSpreadsheet';
 import { useSyncedPref } from '#hooks/useSyncedPref';
@@ -79,7 +83,18 @@ export function Budget() {
 
     void run();
   });
-  useEffect(() => init(), []);
+
+  // The bounds and the prewarmed cells are expressed in the units of the
+  // active budget cadence (calendar months or pay period IDs), so both go
+  // stale when the pay period configuration changes. That normally happens
+  // on the settings route (this page is unmounted), but a change synced
+  // from another device — or an undo — can land while the budget is on
+  // screen, so re-run the initialization and re-gate the table on it.
+  const configKey = payPeriodConfigKey(payPeriodConfig);
+  useEffect(() => {
+    setInitialized(false);
+    init();
+  }, [configKey]);
 
   const loadBoundBudgets = useEffectEvent(() => {
     void send('get-budget-bounds').then(({ start, end }) => {
@@ -204,7 +219,17 @@ export function Budget() {
   };
 
   if (!initialized || !categoryGroups) {
-    return null;
+    return (
+      <View
+        style={{
+          ...styles.page,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <AnimatedLoading width={25} height={25} />
+      </View>
+    );
   }
 
   let table;

@@ -333,11 +333,19 @@ export function isCurrentMonth(month: DateLike): boolean {
 }
 
 /**
- * Sanitizes a persisted budget start month (the `budget.startMonth` local
- * pref) against the active mode: a stored pay period ID is only valid
- * while pay periods are active, and vice versa. Returns `fallback`
- * (typically `currentBudgetMonth()`) when the stored value belongs to the
- * other mode — e.g. right after toggling pay periods on or off.
+ * Sanitizes a persisted budget month (the `budget.startMonth` local pref, a
+ * month in a URL) against the active configuration. Returns `fallback`
+ * (typically `currentBudgetMonth()`) when the stored value can't be a
+ * budget column right now, which happens in three ways:
+ *
+ * - a pay period was stored but pay periods are now off,
+ * - a calendar month was stored but pay periods are now on,
+ * - a pay period was stored and pay periods are still on, but the cadence
+ *   changed and that period no longer exists — e.g. '2026-40' is period 28
+ *   of a weekly year, and a monthly cadence only reaches '2026-24'.
+ *
+ * The third case is the subtle one: the ID still looks like a pay period,
+ * so a kind check alone lets it through to a sheet that was never created.
  */
 export function resolveStartMonth(
   stored: string | undefined,
@@ -346,8 +354,23 @@ export function resolveStartMonth(
   if (!stored) {
     return fallback;
   }
-  const active = getPayPeriodConfig() != null;
-  return isPayPeriod(stored) === active ? stored : fallback;
+
+  const config = getPayPeriodConfig();
+  if (isPayPeriod(stored) !== (config != null)) {
+    return fallback;
+  }
+  if (config && !periodExists(stored, config)) {
+    return fallback;
+  }
+  return stored;
+}
+
+function periodExists(monthId: string, config: PayPeriodConfig): boolean {
+  const year = Number(getYear(monthId));
+  if (Number.isNaN(year)) {
+    return false;
+  }
+  return generatePayPeriods(year, config).some(p => p.monthId === monthId);
 }
 
 export function isCurrentDay(day: DateLike): boolean {

@@ -34,21 +34,21 @@ async function selectPayFrequency(page: Page, frequencyLabel: string) {
 /**
  * Toggles the "Budget by pay period" checkbox into the desired state.
  *
- * Clicks on the settings checkboxes can race a re-render and get lost,
- * but a click that did land resolves slowly — the synced pref (and so
- * the checkbox) only updates once the server has rebuilt every budget
- * sheet for the new mode. So lost clicks are retried, with an inner wait
- * long enough to never double-click during a legitimate in-flight save.
+ * The control is disabled for as long as the save is in flight — the
+ * server cold-builds every budget column for the new mode before the pref
+ * save resolves — so one click is enough; just wait for it to come back.
  */
 async function togglePayPeriods(page: Page, enabled: boolean) {
   const checkbox = getPayPeriodCheckbox(page);
   await expect(checkbox).toBeEnabled();
-  await expect(async () => {
-    if ((await checkbox.isChecked()) !== enabled) {
-      await checkbox.click();
-    }
-    await expect(checkbox).toBeChecked({ checked: enabled, timeout: 20000 });
-  }).toPass({ timeout: 120000 });
+
+  if ((await checkbox.isChecked()) === enabled) {
+    return;
+  }
+
+  await checkbox.click();
+  await expect(checkbox).toBeChecked({ checked: enabled, timeout: 60000 });
+  await expect(checkbox).toBeEnabled({ timeout: 60000 });
 }
 
 /**
@@ -114,8 +114,11 @@ test.describe('Pay period settings', () => {
     await page.locator('#pay-period-start-date').fill(PAY_PERIOD_START_DATE);
     await expect(checkbox).toBeEnabled();
 
+    // The click is only acknowledged once the server has rebuilt the
+    // budget sheets for the new mode.
     await checkbox.click();
-    await expect(checkbox).toBeChecked();
+    await expect(checkbox).toBeChecked({ timeout: 60000 });
+    await expect(checkbox).toBeEnabled({ timeout: 60000 });
   });
 
   test('disabling pay periods returns the budget page to calendar months', async () => {
@@ -149,6 +152,50 @@ test.describe('Pay period settings', () => {
     await expect(
       budgetPage.budgetSummary.nth(1).getByText('January'),
     ).toBeVisible();
+  });
+
+  test('undoing the pay period toggle keeps the UI in sync with the server', async () => {
+    const settingsPage = await navigation.goToSettingsPage();
+    await settingsPage.enableExperimentalFeature('Pay periods');
+    await configureAndEnablePayPeriods(page);
+
+    const checkbox = getPayPeriodCheckbox(page);
+
+    // Undo reverts the preference server-side, which rebuilds the budget
+    // sheets back to calendar months. The client is told about it and must
+    // follow — otherwise the checkbox would keep claiming pay periods are
+    // on and the budget page would ask for sheets that no longer exist.
+    // The global Ctrl+Z handler ignores the shortcut while an input has
+    // focus, and the toggle click left the checkbox focused.
+    await page.evaluate(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+    });
+    await page.keyboard.press('Control+z');
+
+    await expect(checkbox).toBeChecked({ checked: false, timeout: 60000 });
+    await expect(checkbox).toBeEnabled({ timeout: 60000 });
+
+    const budgetPage = await navigation.goToBudgetPage();
+    await expect(budgetPage.selectedMonthButton).toHaveAttribute(
+      'data-month',
+      CURRENT_CALENDAR_MONTH,
+      { timeout: 60000 },
+    );
+
+    // No error boundary, either the route-level one or the app-level one.
+    await expect(
+      page.getByText('Something went wrong loading this section.'),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText('There was an unrecoverable error in the UI. Sorry!'),
+    ).toHaveCount(0);
+
+    // The table must show real calendar-month data rather than the zeroed
+    // out cells of a sheet the client is no longer aligned with.
+    await expect(budgetPage.budgetTable).toBeVisible();
+    await expect
+      .poll(() => budgetPage.getTotalSpent(), { timeout: 30000 })
+      .not.toEqual(0);
   });
 });
 

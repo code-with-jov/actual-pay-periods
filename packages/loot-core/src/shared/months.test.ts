@@ -93,6 +93,18 @@ describe('pay period awareness', () => {
     expect(monthUtils.resolveStartMonth('2024-01', '2024-13')).toBe('2024-13');
     expect(monthUtils.resolveStartMonth(undefined, '2024-13')).toBe('2024-13');
   });
+
+  it('resolveStartMonth rejects a period that the active cadence never generates', () => {
+    // A biweekly year has 26-27 periods, so '2024-70' cannot exist even
+    // though it is shaped like a pay period ID.
+    expect(monthUtils.resolveStartMonth('2024-70', '2024-13')).toBe('2024-13');
+
+    // Switching a stored weekly period to a monthly cadence: monthly only
+    // reaches '2024-24', so period 28 has to fall back.
+    setPayPeriodConfig({ payFrequency: 'monthly', startDate: '2024-01-15' });
+    expect(monthUtils.resolveStartMonth('2024-40', '2024-13')).toBe('2024-13');
+    expect(monthUtils.resolveStartMonth('2024-24', '2024-13')).toBe('2024-24');
+  });
 });
 
 describe('pay period IDs without an active config', () => {

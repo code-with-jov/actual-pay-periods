@@ -58,7 +58,10 @@ import { useLocale } from '#hooks/useLocale';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useNavigate } from '#hooks/useNavigate';
 import { useOverspentCategories } from '#hooks/useOverspentCategories';
-import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
+import {
+  payPeriodConfigKey,
+  usePayPeriodConfig,
+} from '#hooks/usePayPeriodConfig';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useSheetValue } from '#hooks/useSheetValue';
 import { useSpreadsheet } from '#hooks/useSpreadsheet';
@@ -116,6 +119,13 @@ export function BudgetPage() {
   const deleteCategoryGroup = useDeleteCategoryGroupMutation();
   const sortCategories = useSortCategoriesMutation();
 
+  // Switching pay periods on or off moves `startMonth` between calendar
+  // months and period IDs, but changing only the cadence can leave it
+  // untouched ('2017-13' is a valid period under every frequency) — the
+  // bounds and prewarmed cells still go stale, so depend on the config too.
+  const payPeriodConfig = usePayPeriodConfig();
+  const configKey = payPeriodConfigKey(payPeriodConfig);
+
   useEffect(() => {
     async function init() {
       const { start, end } = await send('get-budget-bounds');
@@ -127,7 +137,7 @@ export function BudgetPage() {
     }
 
     void init();
-  }, [budgetType, startMonth, dispatch, spreadsheet]);
+  }, [budgetType, startMonth, dispatch, spreadsheet, configKey]);
 
   const onBudgetAction = useCallback(
     async (month, type, args) => {
