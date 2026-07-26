@@ -31,43 +31,9 @@ type ScheduleTemplateTarget = {
   repeat: boolean;
 };
 
-// Walking more columns than this means the schedule's next occurrence is
-// centuries away; bail out rather than spin. Weekly periods make ~53
-// columns a year, so this covers roughly a century of them.
-const MAX_BUDGET_COLUMN_DISTANCE = 6000;
-
-/**
- * Distance from one budget column to another, measured in budget columns.
- *
- * With pay periods several columns can share a calendar month, so a
- * calendar-month distance reports 0 for every column of that month and
- * each one would then fund the schedule in full. `monthUtils.nextMonth`
- * steps pay periods while they are active, so counting steps is correct in
- * both modes; calendar mode keeps using calendar-month arithmetic, which is
- * the same number.
- *
- * Negative distances (schedules in the past) are only ever tested for
- * their sign, so there is no need to walk backwards.
- */
-function budgetColumnDistance(from: string, to: string): number {
-  if (!payPeriodsActive()) {
-    return monthUtils.differenceInCalendarMonths(to, from);
-  }
-  if (to === from) {
-    return 0;
-  }
-  if (to < from) {
-    return -1;
-  }
-
-  let distance = 0;
-  let column = from;
-  while (column < to && distance < MAX_BUDGET_COLUMN_DISTANCE) {
-    column = monthUtils.nextMonth(column);
-    distance += 1;
-  }
-  return distance;
-}
+// `budgetColumnDistance` now lives in shared/months.ts, since the goal
+// template engine needs the same measurement (see category-template-context).
+const budgetColumnDistance = monthUtils.budgetColumnDistance;
 
 // Note on pay periods: `current_month` may be a pay period ID; `_parse`
 // resolves it to the period's start date and the addMonths/subMonths/

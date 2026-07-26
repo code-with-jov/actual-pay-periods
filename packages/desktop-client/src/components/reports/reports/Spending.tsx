@@ -38,6 +38,7 @@ import {
   getSpendingAverageRangeOptions,
   getSpendingAverageSummaryLabel,
   normalizeSpendingAverageRange,
+  resolveSpendingReportMode,
   spendingAverageRangeFromKey,
   spendingAverageRangeToKey,
 } from '#components/reports/spendingAverageRange';
@@ -48,6 +49,7 @@ import { useDashboardWidget } from '#hooks/useDashboardWidget';
 import { useFormat } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { useNavigate } from '#hooks/useNavigate';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 import { addNotification } from '#notifications/notificationsSlice';
@@ -96,7 +98,10 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
   const emptyIntervals: { name: string; pretty: string }[] = [];
   const [allIntervals, setAllIntervals] = useState(emptyIntervals);
 
-  const initialReportMode = widget?.meta?.mode ?? 'single-month';
+  // The "Budgeted" comparison reads calendar-month budgets, which don't
+  // exist while budgeting by pay period; see resolveSpendingReportMode.
+  const payPeriodsBlockBudgetMode = usePayPeriodConfig() != null;
+  const initialReportMode = resolveSpendingReportMode(widget?.meta?.mode);
   const [initialCompare, initialCompareTo] = calculateSpendingReportTimeRange(
     widget?.meta ?? {},
   );
@@ -367,17 +372,36 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
               >
                 <Trans>Single month</Trans>
               </ModeButton>
-              <ModeButton
-                selected={reportMode === 'budget'}
-                onSelect={() => {
-                  setReportMode('budget');
-                }}
+              <Tooltip
+                placement="top"
+                content={
+                  <Text>
+                    <Trans>
+                      Budgeted amounts aren&apos;t available while you budget by
+                      pay period
+                    </Trans>
+                  </Text>
+                }
                 style={{
-                  backgroundColor: 'inherit',
+                  ...styles.tooltip,
+                  lineHeight: 1.5,
+                  padding: '6px 10px',
                 }}
+                triggerProps={{ isDisabled: !payPeriodsBlockBudgetMode }}
               >
-                <Trans>Budgeted</Trans>
-              </ModeButton>
+                <ModeButton
+                  selected={reportMode === 'budget'}
+                  onSelect={() => {
+                    setReportMode('budget');
+                  }}
+                  isDisabled={payPeriodsBlockBudgetMode}
+                  style={{
+                    backgroundColor: 'inherit',
+                  }}
+                >
+                  <Trans>Budgeted</Trans>
+                </ModeButton>
+              </Tooltip>
               <ModeButton
                 selected={reportMode === 'average'}
                 onSelect={() => {

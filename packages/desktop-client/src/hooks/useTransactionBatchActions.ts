@@ -228,14 +228,18 @@ export function useTransactionBatchActions() {
     };
 
     const pushCategoryAutocompleteModal = () => {
-      // Only show balances when all selected transaction are in the same month.
+      // Only show balances when all selected transactions fall in the same
+      // budget column. The modal turns this into a sheet name, so it has to
+      // be the pay period while pay periods are active — a calendar month
+      // would name a sheet that doesn't exist and every balance would read
+      // as zero. `budgetMonthFromDate` is the calendar month when they're off.
       const transactionMonth = transactions[0]?.date
-        ? monthUtils.monthFromDate(transactions[0]?.date)
+        ? monthUtils.budgetMonthFromDate(transactions[0]?.date)
         : null;
       const transactionsHaveSameMonth =
         transactionMonth &&
         transactions.every(
-          t => monthUtils.monthFromDate(t.date) === transactionMonth,
+          t => monthUtils.budgetMonthFromDate(t.date) === transactionMonth,
         );
       dispatch(
         pushModal({

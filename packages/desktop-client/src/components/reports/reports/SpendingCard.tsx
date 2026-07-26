@@ -19,6 +19,7 @@ import { calculateSpendingReportTimeRange } from '#components/reports/reportRang
 import {
   getSpendingAverageRangeLabel,
   normalizeSpendingAverageRange,
+  resolveSpendingReportMode,
 } from '#components/reports/spendingAverageRange';
 import { createSpendingSpreadsheet } from '#components/reports/spreadsheets/spending-spreadsheet';
 import { useReport } from '#components/reports/useReport';
@@ -47,7 +48,7 @@ export function SpendingCard({
   const [isCardHovered, setIsCardHovered] = useState(false);
   const [nameMenuOpen, setNameMenuOpen] = useState(false);
 
-  const spendingReportMode = meta?.mode ?? 'single-month';
+  const spendingReportMode = resolveSpendingReportMode(meta?.mode);
   const averageRange = normalizeSpendingAverageRange(meta?.averageRange);
   const averageRangeLabel = getSpendingAverageRangeLabel(averageRange, t);
 

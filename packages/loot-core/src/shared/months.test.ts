@@ -94,6 +94,41 @@ describe('pay period awareness', () => {
     expect(monthUtils.resolveStartMonth(undefined, '2024-13')).toBe('2024-13');
   });
 
+  it('budgetColumnDayRange returns the period days, not the calendar month days', () => {
+    // '2024-13' is Jan 5 - Jan 18 under this config. firstDayOfMonth would
+    // resolve the period to Jan 5 and then snap back to Jan 1.
+    expect(monthUtils.budgetColumnDayRange('2024-13')).toEqual({
+      start: '2024-01-05',
+      end: '2024-01-18',
+    });
+    expect(monthUtils.budgetColumnDayRange('2024-02')).toEqual({
+      start: '2024-02-01',
+      end: '2024-02-29',
+    });
+  });
+
+  it('budgetColumnDistance counts columns, and reports past targets as negative', () => {
+    expect(monthUtils.budgetColumnDistance('2024-13', '2024-13')).toBe(0);
+    expect(monthUtils.budgetColumnDistance('2024-13', '2024-16')).toBe(3);
+    expect(monthUtils.budgetColumnDistance('2024-16', '2024-13')).toBeLessThan(
+      0,
+    );
+    // Across a year boundary: the last period of 2024 to the first of 2025.
+    const lastOf2024 = monthUtils.getYearEnd('2024-13');
+    expect(monthUtils.budgetColumnDistance(lastOf2024, '2025-13')).toBe(1);
+  });
+
+  it('budgetColumnForCalendarMonth maps a calendar target onto a column', () => {
+    // A goal due "by February" may use every column February contains, so
+    // the deadline is the column holding Feb 29.
+    expect(monthUtils.budgetColumnForCalendarMonth('2024-02', 'end')).toBe(
+      monthUtils.budgetMonthFromDate('2024-02-29'),
+    );
+    expect(monthUtils.budgetColumnForCalendarMonth('2024-02', 'start')).toBe(
+      monthUtils.budgetMonthFromDate('2024-02-01'),
+    );
+  });
+
   it('resolveStartMonth rejects a period that the active cadence never generates', () => {
     // A biweekly year has 26-27 periods, so '2024-70' cannot exist even
     // though it is shaped like a pay period ID.
@@ -125,5 +160,23 @@ describe('pay period IDs without an active config', () => {
 
   it('budgetMonthFromDate falls back to the calendar month', () => {
     expect(monthUtils.budgetMonthFromDate('2024-01-10')).toBe('2024-01');
+  });
+
+  it('budget column helpers are calendar identities', () => {
+    expect(monthUtils.budgetColumnDayRange('2024-02')).toEqual({
+      start: '2024-02-01',
+      end: '2024-02-29',
+    });
+    expect(monthUtils.budgetColumnDistance('2024-01', '2024-04')).toBe(3);
+    expect(monthUtils.budgetColumnForCalendarMonth('2024-02', 'end')).toBe(
+      '2024-02',
+    );
+    expect(monthUtils.budgetColumnForCalendarMonth('2024-02', 'start')).toBe(
+      '2024-02',
+    );
+  });
+
+  it('getYearStart fails fast on a period ID', () => {
+    expect(() => monthUtils.getYearStart('2024-20')).toThrow(/no pay period/);
   });
 });

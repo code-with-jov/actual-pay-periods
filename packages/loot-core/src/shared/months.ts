@@ -3,7 +3,10 @@ import * as d from 'date-fns';
 import type { Locale } from 'date-fns';
 
 import { memoizeOne } from '#shared/memoize';
-import { getPayPeriodConfig } from '#shared/pay-period-config';
+import {
+  getPayPeriodConfig,
+  payPeriodsActive,
+} from '#shared/pay-period-config';
 import {
   addPayPeriods,
   generatePayPeriods,
@@ -326,10 +329,12 @@ export function isAfter(month1: DateLike, month2: DateLike): boolean {
 }
 
 export function isCurrentMonth(month: DateLike): boolean {
-  const current = isPayPeriodValue(month)
-    ? currentBudgetMonth()
-    : currentMonth();
-  return month === current;
+  // Compare against the current budget column for the *active* mode, not for
+  // whatever shape the argument happens to have: every caller uses this to
+  // highlight the current budget column, and while pay periods are on a
+  // calendar month is never that column — deciding by the argument's shape
+  // let a stale calendar ID light up as "current".
+  return month === currentBudgetMonth();
 }
 
 /**
@@ -394,6 +399,92 @@ export function bounds(month: DateLike): { start: number; end: number } {
     start: parseInt(d.format(d.startOfMonth(_parse(month)), 'yyyyMMdd')),
     end: parseInt(d.format(d.endOfMonth(_parse(month)), 'yyyyMMdd')),
   };
+}
+
+/**
+ * The first and last day (`yyyy-MM-dd`) covered by a budget column: the pay
+ * period's own day range while pay periods are active, the calendar month's
+ * otherwise.
+ *
+ * Use this — never `firstDayOfMonth`/`lastDayOfMonth` — whenever the value
+ * is a budget *column* rather than a calendar month. `firstDayOfMonth`
+ * resolves a period ID to the period's start date and then snaps to the
+ * start of that calendar month, which is a different day.
+ */
+export function budgetColumnDayRange(month: string): {
+  start: string;
+  end: string;
+} {
+  if (isPayPeriodValue(month)) {
+    const { startDate, endDate } = getPayPeriodBounds(
+      month,
+      requirePayPeriodConfig(month),
+    );
+    return { start: startDate, end: endDate };
+  }
+  return { start: firstDayOfMonth(month), end: lastDayOfMonth(month) };
+}
+
+// Guards the budget column walk below against a malformed pair (e.g. a
+// target month far outside the budget) spinning forever.
+const MAX_BUDGET_COLUMN_DISTANCE = 10000;
+
+/**
+ * Distance from one budget column to another, measured in budget columns.
+ *
+ * With pay periods several columns can share a calendar month, so a
+ * calendar-month distance reports 0 for every column of that month — and a
+ * goal that divides by it then funds itself in full in each one. `nextMonth`
+ * steps pay periods while they are active, so counting steps is correct in
+ * both modes; in calendar mode the count is the calendar-month difference.
+ *
+ * Negative distances are reported as -1: callers only test them for sign
+ * (a target already in the past), so there is no need to walk backwards.
+ */
+export function budgetColumnDistance(from: string, to: string): number {
+  if (!payPeriodsActive()) {
+    return differenceInCalendarMonths(to, from);
+  }
+  if (to === from) {
+    return 0;
+  }
+  if (to < from) {
+    return -1;
+  }
+
+  let distance = 0;
+  let column = from;
+  while (column < to && distance < MAX_BUDGET_COLUMN_DISTANCE) {
+    column = nextMonth(column);
+    distance += 1;
+  }
+  return distance;
+}
+
+/**
+ * The budget column that a calendar month's first or last day falls in.
+ *
+ * Goal templates state their windows in calendar terms ("by August", "from
+ * March") no matter what the budget column cadence is, so those months have
+ * to be mapped onto columns before any column arithmetic. Identity when pay
+ * periods are off.
+ *
+ * `edge: 'end'` is the right choice for a deadline — a goal due "by August"
+ * may use every column that August contains — and `'start'` for the opening
+ * of a window.
+ */
+export function budgetColumnForCalendarMonth(
+  calendarMonth: string,
+  edge: 'start' | 'end',
+): string {
+  if (!payPeriodsActive()) {
+    return calendarMonth;
+  }
+  return budgetMonthFromDate(
+    edge === 'end'
+      ? lastDayOfMonth(calendarMonth)
+      : firstDayOfMonth(calendarMonth),
+  );
 }
 
 export function _yearRange(
@@ -555,6 +646,11 @@ export function getWeekEnd(
 
 export function getYearStart(month: string): string {
   if (isPayPeriod(month)) {
+    // The first period of a year is always '-13', so this needs no config to
+    // compute — but a period ID reaching here while pay periods are off means
+    // a stale ID leaked in from the other mode, and returning another period
+    // ID would carry it further. Fail the same way getYearEnd does.
+    requirePayPeriodConfig(month);
     return getYear(month) + '-13';
   }
   return getYear(month) + '-01';

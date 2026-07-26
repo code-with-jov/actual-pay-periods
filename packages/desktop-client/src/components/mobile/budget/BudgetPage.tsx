@@ -100,10 +100,21 @@ export function BudgetPage() {
   // pay period ID persisted before pay periods were switched off) — fall
   // back to the current budget month instead of crashing on it.
   const startMonth = monthUtils.resolveStartMonth(startMonthPref, currMonth);
-  const [monthBounds, setMonthBounds] = useState({
+  // Switching pay periods on or off moves `startMonth` between calendar
+  // months and period IDs, but changing only the cadence can leave it
+  // untouched ('2017-13' is a valid period under every frequency) — the
+  // bounds and prewarmed cells still go stale, so depend on the config too.
+  const payPeriodConfig = usePayPeriodConfig();
+  const configKey = payPeriodConfigKey(payPeriodConfig);
+  // Tagged with the cadence these bounds describe; see the same pattern on
+  // desktop (components/budget/index.tsx). Mobile only string-compares the
+  // bounds so a stale pair doesn't throw, but it does enable or disable the
+  // previous/next arrows against the wrong end of the budget.
+  const [monthBounds, setMonthBounds] = useState(() => ({
     start: startMonth,
     end: startMonth,
-  });
+    configKey,
+  }));
   // const [editMode, setEditMode] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [_numberFormat] = useSyncedPref('numberFormat');
@@ -119,17 +130,13 @@ export function BudgetPage() {
   const deleteCategoryGroup = useDeleteCategoryGroupMutation();
   const sortCategories = useSortCategoriesMutation();
 
-  // Switching pay periods on or off moves `startMonth` between calendar
-  // months and period IDs, but changing only the cadence can leave it
-  // untouched ('2017-13' is a valid period under every frequency) — the
-  // bounds and prewarmed cells still go stale, so depend on the config too.
-  const payPeriodConfig = usePayPeriodConfig();
-  const configKey = payPeriodConfigKey(payPeriodConfig);
-
   useEffect(() => {
     async function init() {
+      // Captured before the await; a cadence change while this request is
+      // in flight would otherwise mis-tag the bounds it returns.
+      const requestedConfigKey = configKey;
       const { start, end } = await send('get-budget-bounds');
-      setMonthBounds({ start, end });
+      setMonthBounds({ start, end, configKey: requestedConfigKey });
 
       await prewarmMonth(budgetType, spreadsheet, startMonth);
 
@@ -555,7 +562,9 @@ export function BudgetPage() {
     onToggleHiddenCategories,
   ]);
 
-  if (!categoryGroups || !initialized) {
+  // `monthBounds.configKey !== configKey` catches the render where the
+  // cadence has already flipped but the refetched bounds haven't landed.
+  if (!categoryGroups || !initialized || monthBounds.configKey !== configKey) {
     return (
       <View
         style={{

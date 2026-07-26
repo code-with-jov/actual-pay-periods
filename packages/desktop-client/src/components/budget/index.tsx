@@ -55,10 +55,19 @@ export function Budget() {
   // pay periods are active, or vice versa) must not leak into month math —
   // mixing the two kinds produces broken ranges.
   const startMonth = monthUtils.resolveStartMonth(startMonthPref, currentMonth);
-  const [bounds, setBounds] = useState({
+  // `bounds` is tagged with the cadence it was fetched for. The registry
+  // that resolves pay period IDs is updated *during* render (see
+  // usePayPeriodConfigSync), so on the render where the cadence flips,
+  // `startMonth` is already expressed in the new mode while this state
+  // still holds the old mode's bounds. Rendering the table with that pair
+  // throws (`rangeInclusive` refuses to mix a calendar month and a pay
+  // period), so the tag lets the gate below reject the stale pair in the
+  // same render rather than one effect later.
+  const [bounds, setBounds] = useState(() => ({
     start: startMonth,
     end: startMonth,
-  });
+    configKey: payPeriodConfigKey(payPeriodConfig),
+  }));
   const [budgetType = 'envelope'] = useSyncedPref('budgetType');
   const [maxMonthsPref] = useGlobalPref('maxMonths');
   const maxMonths = maxMonthsPref || 1;
@@ -68,8 +77,13 @@ export function Budget() {
 
   const init = useEffectEvent(() => {
     async function run() {
+      // Captured before the await: if the cadence changes again while this
+      // request is in flight, the bounds it returns describe the cadence
+      // that was active when it was sent, not the one active when it
+      // resolves.
+      const requestedConfigKey = payPeriodConfigKey(payPeriodConfig);
       const { start, end } = await send('get-budget-bounds');
-      setBounds({ start, end });
+      setBounds({ start, end, configKey: requestedConfigKey });
 
       await prewarmAllMonths(
         budgetType,
@@ -97,9 +111,10 @@ export function Budget() {
   }, [configKey]);
 
   const loadBoundBudgets = useEffectEvent(() => {
+    const requestedConfigKey = payPeriodConfigKey(payPeriodConfig);
     void send('get-budget-bounds').then(({ start, end }) => {
       if (bounds.start !== start || bounds.end !== end) {
-        setBounds({ start, end });
+        setBounds({ start, end, configKey: requestedConfigKey });
       }
     });
   });
@@ -218,7 +233,9 @@ export function Budget() {
     applyBudgetAction.mutate({ month, type, args });
   };
 
-  if (!initialized || !categoryGroups) {
+  // `bounds.configKey !== configKey` catches the render where the cadence
+  // has already flipped but the refetched bounds haven't arrived yet.
+  if (!initialized || bounds.configKey !== configKey || !categoryGroups) {
     return (
       <View
         style={{
