@@ -28,6 +28,10 @@ import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
+import {
+  getPayPeriodLabel,
+  isPayPeriod,
+} from '@actual-app/core/shared/pay-periods';
 import { groupById } from '@actual-app/core/shared/util';
 import type { TransObjectLiteral } from '@actual-app/core/types/util';
 
@@ -54,6 +58,7 @@ import { useLocale } from '#hooks/useLocale';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useNavigate } from '#hooks/useNavigate';
 import { useOverspentCategories } from '#hooks/useOverspentCategories';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useSheetValue } from '#hooks/useSheetValue';
 import { useSpreadsheet } from '#hooks/useSpreadsheet';
@@ -86,9 +91,12 @@ export function BudgetPage() {
   const goalTemplatesUIEnabled = useFeatureFlag('goalTemplatesUIEnabled');
   const spreadsheet = useSpreadsheet();
 
-  const currMonth = monthUtils.currentMonth();
-  const [startMonth = currMonth, setStartMonthPref] =
-    useLocalPref('budget.startMonth');
+  const currMonth = monthUtils.currentBudgetMonth();
+  const [startMonthPref, setStartMonthPref] = useLocalPref('budget.startMonth');
+  // The stored start month may belong to the other budgeting mode (e.g. a
+  // pay period ID persisted before pay periods were switched off) — fall
+  // back to the current budget month instead of crashing on it.
+  const startMonth = monthUtils.resolveStartMonth(startMonthPref, currMonth);
   const [monthBounds, setMonthBounds] = useState({
     start: startMonth,
     end: startMonth,
@@ -283,14 +291,14 @@ export function BudgetPage() {
   );
 
   const onPrevMonth = useCallback(async () => {
-    const month = monthUtils.subMonths(startMonth, 1);
+    const month = monthUtils.prevMonth(startMonth);
     await prewarmMonth(budgetType, spreadsheet, month);
     setStartMonthPref(month);
     setInitialized(true);
   }, [budgetType, setStartMonthPref, spreadsheet, startMonth]);
 
   const onNextMonth = useCallback(async () => {
-    const month = monthUtils.addMonths(startMonth, 1);
+    const month = monthUtils.nextMonth(startMonth);
     await prewarmMonth(budgetType, spreadsheet, month);
     setStartMonthPref(month);
     setInitialized(true);
@@ -485,7 +493,7 @@ export function BudgetPage() {
             name: 'notes',
             options: {
               id: `budget-${month}`,
-              name: monthUtils.format(month, "MMMM ''yy", locale),
+              name: monthUtils.nameForMonth(month, locale),
               onSave: onSaveNotes,
             },
           },
@@ -986,6 +994,10 @@ function MonthSelector({
 }) {
   const locale = useLocale();
   const { t } = useTranslation();
+  const payPeriodConfig = usePayPeriodConfig();
+  const isPeriodMode = payPeriodConfig != null && isPayPeriod(month);
+  // Lexicographic comparison is valid for both calendar months and pay
+  // period IDs (both are 'YYYY-MM' within a single scheme).
   const prevEnabled = month > monthBounds.start;
   const nextEnabled = month < monthUtils.subMonths(monthBounds.end, 1);
 
@@ -1004,7 +1016,7 @@ function MonthSelector({
       }}
     >
       <Button
-        aria-label={t('Previous month')}
+        aria-label={isPeriodMode ? t('Previous period') : t('Previous month')}
         variant="bare"
         isDisabled={!prevEnabled}
         onPress={onPrevMonth}
@@ -1025,11 +1037,13 @@ function MonthSelector({
         data-month={month}
       >
         <Text style={styles.underlinedText}>
-          {monthUtils.format(month, "MMMM ''yy", locale)}
+          {isPeriodMode
+            ? getPayPeriodLabel(month, payPeriodConfig, 'short', locale)
+            : monthUtils.format(month, "MMMM ''yy", locale)}
         </Text>
       </Button>
       <Button
-        aria-label={t('Next month')}
+        aria-label={isPeriodMode ? t('Next period') : t('Next month')}
         variant="bare"
         isDisabled={!nextEnabled}
         onPress={onNextMonth}

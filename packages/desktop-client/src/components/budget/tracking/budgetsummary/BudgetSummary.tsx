@@ -14,11 +14,16 @@ import { styles } from '@actual-app/components/styles';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import * as monthUtils from '@actual-app/core/shared/months';
+import {
+  getPayPeriodLabel,
+  isPayPeriod,
+} from '@actual-app/core/shared/pay-periods';
 import { css } from '@emotion/css';
 
 import { useTrackingBudget } from '#components/budget/tracking/TrackingBudgetContext';
 import { NotesButton } from '#components/NotesButton';
 import { useLocale } from '#hooks/useLocale';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useUndo } from '#hooks/useUndo';
 
@@ -56,7 +61,13 @@ export function BudgetSummary({ month }: BudgetSummaryProps) {
     ? SvgArrowButtonDown1
     : SvgArrowButtonUp1;
 
-  const displayMonth = monthUtils.format(month, "MMMM ''yy", locale);
+  const payPeriodConfig = usePayPeriodConfig();
+
+  const displayMonth = monthUtils.nameForMonth(month, locale);
+  const monthTitle =
+    payPeriodConfig && isPayPeriod(month)
+      ? getPayPeriodLabel(month, payPeriodConfig, 'short', locale)
+      : monthUtils.format(month, 'MMMM', locale);
 
   return (
     <View
@@ -125,7 +136,7 @@ export function BudgetSummary({ month }: BudgetSummaryProps) {
               textDecorationSkip: 'ink',
             })}
           >
-            {monthUtils.format(month, 'MMMM', locale)}
+            {monthTitle}
           </div>
 
           <View

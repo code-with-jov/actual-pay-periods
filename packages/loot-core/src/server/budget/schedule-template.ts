@@ -30,6 +30,12 @@ type ScheduleTemplateTarget = {
   repeat: boolean;
 };
 
+// Note on pay periods: `current_month` may be a pay period ID; `_parse`
+// resolves it to the period's start date and the addMonths/subMonths/
+// sheetForMonth navigation below is period-aware. The schedule math itself
+// (calendar-month distances to the next occurrence, monthly contribution
+// targets) stays intentionally calendar-based — schedules are defined in
+// calendar time regardless of the budget column cadence.
 async function createScheduleList(
   templates: ScheduleTemplate[],
   current_month: string,

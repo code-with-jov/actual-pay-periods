@@ -22,7 +22,7 @@ export function TrackingBudgetSummaryModal({
   month,
 }: TrackingBudgetSummaryModalProps) {
   const { t } = useTranslation();
-  const currentMonth = monthUtils.currentMonth();
+  const currentMonth = monthUtils.currentBudgetMonth();
   return (
     <Modal name="tracking-budget-summary">
       {({ state }) => (

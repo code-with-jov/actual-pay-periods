@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useResponsive } from '@actual-app/components/hooks/useResponsive';
 import { AnimatedLoading } from '@actual-app/components/icons/AnimatedLoading';
 import { View } from '@actual-app/components/view';
-import { currentMonth } from '@actual-app/core/shared/months';
+import { currentBudgetMonth } from '@actual-app/core/shared/months';
 import { q } from '@actual-app/core/shared/query';
 import type { CleanupTemplate } from '@actual-app/core/types/models/cleanup-templates';
 import type { Template } from '@actual-app/core/types/models/templates';
@@ -37,7 +37,7 @@ export function BudgetAutomationsModal({
   const [parsedCleanup, setParsedCleanup] = useState<CleanupTemplate[] | null>(
     null,
   );
-  const effectiveMonth = month ?? currentMonth();
+  const effectiveMonth = month ?? currentBudgetMonth();
 
   const onLoaded = (result: Record<string, Template[]>) => {
     setParsedTemplates(result[categoryId] ?? []);

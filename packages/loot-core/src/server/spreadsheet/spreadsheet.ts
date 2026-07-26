@@ -30,6 +30,9 @@ export class Spreadsheet {
   _meta: {
     createdMonths: Set<string>;
     budgetType: BudgetType;
+    // Sheet name of the envelope budget's "blank month" (the month before
+    // the first created month); managed by server/budget/envelope.ts.
+    blankSheet?: string | null;
   };
   cacheBarrier;
   computeQueue;

@@ -1,3 +1,4 @@
+import { expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
 
 export class SettingsPage {
@@ -58,8 +59,14 @@ export class SettingsPage {
       name: featureName,
     });
     await featureCheckbox.waitFor({ state: 'visible' });
-    if (!(await featureCheckbox.isChecked())) {
-      await featureCheckbox.click();
-    }
+    // The click can race a settings re-render and get lost, and features
+    // gated behind the flag only mount once it actually lands — so retry
+    // the click until the checkbox reflects it.
+    await expect(async () => {
+      if (!(await featureCheckbox.isChecked())) {
+        await featureCheckbox.click();
+      }
+      await expect(featureCheckbox).toBeChecked({ timeout: 2000 });
+    }).toPass({ timeout: 15000 });
   }
 }

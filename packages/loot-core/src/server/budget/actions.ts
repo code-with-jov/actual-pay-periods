@@ -445,8 +445,11 @@ async function getAverageMonths({
 function getAverageStartMonth(month: string): string {
   const prevMonth = monthUtils.prevMonth(month);
 
-  if (prevMonth >= monthUtils.currentMonth()) {
-    return monthUtils.prevMonth(monthUtils.currentMonth());
+  // "The current budget column": the current pay period when pay periods
+  // are active, otherwise the current calendar month.
+  const currentMonth = monthUtils.currentBudgetMonth();
+  if (prevMonth >= currentMonth) {
+    return monthUtils.prevMonth(currentMonth);
   }
 
   return prevMonth;
@@ -461,26 +464,39 @@ async function getFirstActivityMonth({
 }): Promise<string | null> {
   const table = getBudgetTable();
   const endDbMonth = dbMonth(endMonth);
-  const firstActivity = await db.first<{ month: number | null }>(
-    `SELECT MIN(month) AS month
-       FROM (
-         SELECT month
-           FROM ${table}
-          WHERE category = ? AND month <= ?
-         UNION ALL
-         SELECT CAST(t.date / 100 AS INTEGER) AS month
-           FROM v_transactions_internal_alive t
-           LEFT JOIN accounts a ON a.id = t.account
-          WHERE t.category = ?
-            AND CAST(t.date / 100 AS INTEGER) <= ?
-            AND a.offbudget = 0
-       )`,
-    [categoryId, endDbMonth, categoryId, endDbMonth],
+  const firstBudget = await db.first<{ month: number | null }>(
+    `SELECT MIN(month) AS month FROM ${table} WHERE category = ? AND month <= ?`,
+    [categoryId, endDbMonth],
   );
 
-  return firstActivity?.month == null
-    ? null
-    : monthFromDbMonth(firstActivity.month);
+  // Transactions are matched by date containment (through the end of
+  // `endMonth`) rather than by `t.date / 100`, because pay period budget
+  // columns don't line up with calendar-month date buckets.
+  const { end: endDay } = monthUtils.bounds(endMonth);
+  const firstTransaction = await db.first<{ date: number | null }>(
+    `SELECT MIN(t.date) AS date
+       FROM v_transactions_internal_alive t
+       LEFT JOIN accounts a ON a.id = t.account
+      WHERE t.category = ?
+        AND t.date <= ?
+        AND a.offbudget = 0`,
+    [categoryId, endDay],
+  );
+
+  const budgetMonth =
+    firstBudget?.month == null ? null : monthFromDbMonth(firstBudget.month);
+  const transactionMonth =
+    firstTransaction?.date == null
+      ? null
+      : monthUtils.budgetMonthFromDate(db.fromDateRepr(firstTransaction.date));
+
+  if (budgetMonth == null) {
+    return transactionMonth;
+  }
+  if (transactionMonth == null) {
+    return budgetMonth;
+  }
+  return budgetMonth < transactionMonth ? budgetMonth : transactionMonth;
 }
 
 export async function holdForNextMonth({

@@ -62,7 +62,7 @@ export function EnvelopeBudgetMonthMenuModal({
     setShowMore(!showMore);
   };
 
-  const displayMonth = monthUtils.format(month, "MMMM ''yy", locale);
+  const displayMonth = monthUtils.nameForMonth(month, locale);
   const { t } = useTranslation();
 
   return (

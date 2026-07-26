@@ -32,6 +32,14 @@ import { getActiveSchedules } from './statements';
 
 export class CategoryTemplateContext {
   /*----------------------------------------------------------------------------
+   * Note on pay periods: `month` may be a pay period ID ('YYYY-MM' with
+   * MM >= 13). Navigation between budget columns (prevMonth/subMonths/
+   * sheetForMonth/etc.) is period-aware, but template *semantics* that
+   * reference calendar time — target months in `by`/`spend` templates,
+   * `differenceInCalendarMonths` spans, weekly/daily limit math — stay
+   * intentionally calendar-based: template definitions are written in
+   * calendar terms regardless of the budget column cadence.
+   *----------------------------------------------------------------------------
    * Using This Class:
    * 1. instantiate via `await categoryTemplate.init(templates, categoryID, month)`;
    *    templates: all templates for this category (including templates and goals)

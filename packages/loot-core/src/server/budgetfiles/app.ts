@@ -9,6 +9,7 @@ import * as fs from '#platform/server/fs';
 import { logger } from '#platform/server/log';
 import { createApp } from '#server/app';
 import * as budget from '#server/budget/base';
+import { loadPayPeriodConfig } from '#server/budget/pay-period-config';
 import * as cloudStorage from '#server/cloud-storage';
 import * as db from '#server/db';
 import * as mappings from '#server/db/mappings';
@@ -34,6 +35,7 @@ import {
   uniqueBudgetName,
   validateBudgetName,
 } from '#server/util/budget-name';
+import { setPayPeriodConfig } from '#shared/pay-period-config';
 import * as Platform from '#shared/platform';
 import type { Budget } from '#types/budget';
 
@@ -258,6 +260,9 @@ async function createDemoBudget() {
 async function closeBudget() {
   captureBreadcrumb({ message: 'Closing budget' });
   resetFormulaPreferencesCache();
+  // Pay period config is per-budget-file state; deactivate it so no pay
+  // period ID can be resolved against a stale configuration.
+  setPayPeriodConfig(null);
 
   // The spreadsheet may be running, wait for it to complete
   await sheet.waitOnSpreadsheet();
@@ -626,6 +631,11 @@ async function _loadBudget(id: Budget['id']): Promise<{
     await closeBudget();
     return { error: 'opening-budget' };
   }
+
+  // Activate pay periods (when configured) before the budget sheets are
+  // built so `createAllBudgets` creates the right kind of columns. The
+  // registry stays active until the budget file is closed.
+  setPayPeriodConfig(loadPayPeriodConfig());
 
   // This is a bit leaky, but we need to set the initial budget type
   const { value: budgetType = 'envelope' } =
