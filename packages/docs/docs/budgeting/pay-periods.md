@@ -79,6 +79,7 @@ While you are budgeting by pay period, reports that read budgeted amounts can't 
 
 - The [Budget Analysis](../experimental/budget-analysis-report.md) card has no data to show.
 - A [custom report](../reports/custom-reports.md) using the **Budgeted** balance type has no data to show.
+- The Spending report's **Budgeted** comparison is unavailable; its **Single month** and **Average** comparisons work normally.
 
 Reports built from your transactions — spending, net worth, cash flow, income vs expenses and the rest — are unaffected and keep working normally.
 
@@ -87,6 +88,16 @@ Reports built from your transactions — spending, net worth, cash flow, income 
 If you use a [goal template](../experimental/goal-templates.md) based on a schedule, and that schedule repeats monthly, the whole amount is budgeted in the single pay period that the bill actually falls in. The earlier periods of that month set nothing aside for it.
 
 So a $1,200 rent payment due on the 1st is funded in full in the period containing the 1st, rather than being spread across the two or three periods that make up the month. If you would rather build the money up over several paychecks, budget for it manually instead of relying on the template.
+
+### Goal Templates Still Speak in Calendar Months
+
+Templates keep their calendar wording whatever your pay cycle is. A goal is written as "by August", "every 2 months" or "$50 a week", and the target month picker offers calendar months only — there's no way to aim a goal at a specific pay period.
+
+Actual converts those windows into pay periods for you, so the saving is spread across the periods you actually have:
+
+- **Save by a month.** A goal due by August is funded across every period between now and the end of August, so each paycheck sets aside a smaller amount than a monthly budget would.
+- **Repeating amounts.** "$25 every week" budgets the occurrences that fall inside each period — usually one — rather than the whole month's worth in every period.
+- **Spending limits.** An `up to` limit is scaled to the period: a weekly limit counts the weeks inside that period, and a daily limit counts its days.
 
 ### Switching Modes Takes a Moment
 

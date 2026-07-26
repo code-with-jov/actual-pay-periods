@@ -1,3 +1,4 @@
+import { resetPayPeriodConfigForTesting } from '@actual-app/core/shared/pay-period-config';
 import { amountToCurrency } from '@actual-app/core/shared/util';
 import type { Page } from '@playwright/test';
 
@@ -5,61 +6,13 @@ import { expect, test } from './fixtures';
 import { ConfigurationPage } from './page-models/configuration-page';
 import type { MobileBudgetPage } from './page-models/mobile-budget-page';
 import { MobileNavigation } from './page-models/mobile-navigation';
-
-// Under Playwright the current date is pinned to 2017-01-01, so a biweekly
-// cadence anchored on 2017-01-01 makes every period deterministic:
-// '2017-13' = Jan 1 - Jan 14 is the current pay period.
-const PAY_PERIOD_START_DATE = '2017-01-01';
-const PAY_PERIOD_FREQUENCY_LABEL = 'Every 2 weeks';
-const CURRENT_PERIOD = '2017-13';
-const CURRENT_PERIOD_LABEL = 'Jan 1 - Jan 14';
-const PREVIOUS_PERIOD = '2016-38';
-const PREVIOUS_PERIOD_LABEL = 'Dec 18 - Dec 31';
-
-/**
- * Configure a biweekly pay period cadence and turn on pay period
- * budgeting. Assumes the settings page is open and the 'Pay periods'
- * feature flag is enabled.
- */
-async function configureAndEnablePayPeriods(page: Page) {
-  // The pay period section only mounts once the experimental flag has
-  // landed; wait for it rather than racing the settings re-render.
-  const frequencySelect = page.locator('#pay-period-frequency');
-  await frequencySelect.waitFor({ state: 'visible', timeout: 15000 });
-  await frequencySelect.click();
-  await page
-    .getByRole('button', { name: PAY_PERIOD_FREQUENCY_LABEL, exact: true })
-    .click();
-  await page.locator('#pay-period-start-date').fill(PAY_PERIOD_START_DATE);
-
-  const checkbox = page.getByRole('checkbox', {
-    name: 'Budget by pay period',
-  });
-  await expect(checkbox).toBeEnabled();
-
-  // The control is disabled for as long as the save is in flight — the
-  // server cold-builds every budget column for the new mode before the
-  // pref save resolves — so one click is enough; wait for it to come back.
-  await checkbox.click();
-  await expect(checkbox).toBeChecked({ timeout: 60000 });
-  await expect(checkbox).toBeEnabled({ timeout: 60000 });
-}
-
-async function goToAdjacentPeriod(
-  budgetPage: MobileBudgetPage,
-  direction: 'Previous period' | 'Next period',
-) {
-  const currentMonth = await budgetPage.getSelectedMonth();
-
-  await budgetPage.heading.getByRole('button', { name: direction }).click();
-
-  await expect(
-    budgetPage.heading.locator('[data-month]'),
-    `Failed to navigate to the ${direction.toLowerCase()}.`,
-  ).not.toHaveAttribute('data-month', currentMonth);
-
-  return budgetPage.getSelectedMonth();
-}
+import {
+  configureAndEnablePayPeriods,
+  CURRENT_PERIOD,
+  CURRENT_PERIOD_LABEL,
+  PREVIOUS_PERIOD,
+  PREVIOUS_PERIOD_LABEL,
+} from './pay-period-helpers';
 
 test.describe('Mobile Budget in pay period mode', () => {
   let page: Page;
@@ -110,6 +63,7 @@ test.describe('Mobile Budget in pay period mode', () => {
   });
 
   test.afterEach(async () => {
+    resetPayPeriodConfigForTesting();
     await page.close();
   });
 
@@ -124,16 +78,13 @@ test.describe('Mobile Budget in pay period mode', () => {
 
   test('previous and next period buttons navigate one period at a time', async () => {
     // One period back crosses the year boundary into 2016's last period.
-    const previousPeriod = await goToAdjacentPeriod(
-      budgetPage,
-      'Previous period',
-    );
+    const previousPeriod = await budgetPage.goToPreviousMonth();
     expect(previousPeriod).toBe(PREVIOUS_PERIOD);
     await expect(budgetPage.selectedBudgetMonthButton).toHaveText(
       PREVIOUS_PERIOD_LABEL,
     );
 
-    const nextPeriod = await goToAdjacentPeriod(budgetPage, 'Next period');
+    const nextPeriod = await budgetPage.goToNextMonth();
     expect(nextPeriod).toBe(CURRENT_PERIOD);
     await expect(budgetPage.selectedBudgetMonthButton).toHaveText(
       CURRENT_PERIOD_LABEL,
@@ -158,13 +109,13 @@ test.describe('Mobile Budget in pay period mode', () => {
     const categoryName = await budgetPage.getCategoryNameForRow(3);
 
     // Budget an amount in the previous period (crosses the year boundary).
-    await goToAdjacentPeriod(budgetPage, 'Previous period');
+    await budgetPage.goToPreviousMonth();
 
     const budgetAmount = 100;
     const budgetMenuModal = await budgetPage.openBudgetMenu(categoryName);
     await budgetMenuModal.setBudgetAmount(`${budgetAmount}00`);
 
-    await goToAdjacentPeriod(budgetPage, 'Next period');
+    await budgetPage.goToNextMonth();
 
     const currentPeriodBudgetMenuModal =
       await budgetPage.openBudgetMenu(categoryName);
@@ -176,6 +127,69 @@ test.describe('Mobile Budget in pay period mode', () => {
     await expect(budgetedButton).toHaveText(amountToCurrency(budgetAmount));
   });
 
+  // Mirrors `applies budget template` in budget.mobile.test.ts, but against
+  // a pay period column. The template engine resolves its windows through
+  // budget columns now (see shared/months.ts budgetColumn* helpers), and
+  // this is the end-to-end check that a template applied in a period lands
+  // the right amount.
+  test('applies a budget template within the period', async () => {
+    const settingsPage = await navigation.goToSettingsPage();
+    await settingsPage.enableExperimentalFeature('Goal templates');
+    const uiToggle = page.getByRole('checkbox', {
+      name: 'Budget automations UI',
+    });
+    await uiToggle.waitFor({ state: 'visible' });
+    if (!(await uiToggle.isChecked())) {
+      await uiToggle.click();
+    }
+
+    budgetPage = await navigation.goToBudgetPage();
+    await expect(budgetPage.selectedBudgetMonthButton).toHaveText(
+      CURRENT_PERIOD_LABEL,
+    );
+
+    const categoryName = await budgetPage.getCategoryNameForRow(1);
+    const amountToTemplate = 123;
+
+    const categoryMenuModal = await budgetPage.openCategoryMenu(categoryName);
+    const automationsModal = await categoryMenuModal.editAutomations();
+    await automationsModal
+      .getByRole('button', { name: 'Add an automation' })
+      .click();
+    const amountField = automationsModal.locator('#amount-field');
+    await amountField.fill(String(amountToTemplate));
+    await amountField.press('Enter');
+    await automationsModal
+      .getByRole('spinbutton', { name: 'Priority' })
+      .fill('0');
+    await automationsModal
+      .getByRole('button', { name: 'Back', exact: true })
+      .click();
+    await automationsModal
+      .getByRole('button', { name: 'Save', exact: true })
+      .click();
+    await expect(automationsModal).toBeHidden();
+
+    const budgetedButton = await budgetPage.getButtonForBudgeted(categoryName);
+    // Starts at 0.00; the assertion below is what proves the template
+    // engine produced a value for this *period* column.
+    await expect(budgetedButton).toHaveText(amountToCurrency(0));
+
+    const budgetMenuModal = await budgetPage.openBudgetMenu(categoryName);
+    await budgetMenuModal.applyBudgetTemplate();
+    await budgetMenuModal.close();
+
+    await expect(budgetedButton).toHaveText(amountToCurrency(amountToTemplate));
+  });
+
+  test('the month menu names the period, not a calendar month', async () => {
+    await budgetPage.openMonthMenu();
+
+    const modal = page.getByRole('dialog', { name: 'Modal dialog' });
+    await expect(modal).toBeVisible();
+    await expect(modal).toContainText(CURRENT_PERIOD_LABEL);
+  });
+
   test("opens a category's transactions filtered to the pay period", async () => {
     const categoryName = await budgetPage.getCategoryNameForRow(0);
     const accountPage = await budgetPage.openSpentPage(categoryName);
@@ -183,5 +197,80 @@ test.describe('Mobile Budget in pay period mode', () => {
     await expect(accountPage.heading).toContainText(categoryName);
     await expect(accountPage.heading).toContainText(CURRENT_PERIOD_LABEL);
     await expect(accountPage.transactionList).toBeVisible();
+  });
+});
+
+test.describe('Mobile Tracking budget in pay period mode', () => {
+  let page: Page;
+  let navigation: MobileNavigation;
+  let configurationPage: ConfigurationPage;
+  let budgetPage: MobileBudgetPage;
+  let previousGlobalIsTesting: boolean;
+
+  test.beforeAll(() => {
+    // TODO: Hack, properly mock the currentMonth function
+    previousGlobalIsTesting = global.IS_TESTING;
+    global.IS_TESTING = true;
+  });
+
+  test.afterAll(() => {
+    // TODO: Hack, properly mock the currentMonth function
+    global.IS_TESTING = previousGlobalIsTesting;
+  });
+
+  test.beforeEach(async ({ browser }) => {
+    test.setTimeout(180_000);
+
+    page = await browser.newPage();
+    navigation = new MobileNavigation(page);
+    configurationPage = new ConfigurationPage(page);
+
+    await page.setViewportSize({ width: 350, height: 600 });
+    await page.goto('/');
+    await configurationPage.createTestFile();
+
+    const settingsPage = await navigation.goToSettingsPage();
+    await settingsPage.useBudgetType('Tracking');
+    await settingsPage.enableExperimentalFeature('Pay periods');
+    await configureAndEnablePayPeriods(page);
+
+    budgetPage = await navigation.goToBudgetPage();
+    await expect(budgetPage.heading.locator('[data-month]')).toHaveAttribute(
+      'data-month',
+      CURRENT_PERIOD,
+      { timeout: 30000 },
+    );
+  });
+
+  test.afterEach(async () => {
+    resetPayPeriodConfigForTesting();
+    await page.close();
+  });
+
+  // The tracking budget reads its cells through `trackingBudgetMonth`, a
+  // different server handler from the envelope budget's — this is the only
+  // coverage that exercises it against pay period sheets.
+  test('renders the tracking budget for the current pay period', async () => {
+    await expect(budgetPage.selectedBudgetMonthButton).toHaveText(
+      CURRENT_PERIOD_LABEL,
+    );
+    await expect(budgetPage.categoryNames.first()).toBeVisible();
+  });
+
+  test('shows the savings summary for the period', async () => {
+    const summaryButton = budgetPage.page.getByRole('button', {
+      name: /Saved|Projected savings|Overspent/,
+    });
+    await expect(summaryButton.first()).toBeVisible();
+  });
+
+  test('updates a budgeted amount in a pay period', async () => {
+    const categoryName = await budgetPage.getCategoryNameForRow(0);
+    const budgetMenuModal = await budgetPage.openBudgetMenu(categoryName);
+
+    await budgetMenuModal.setBudgetAmount('12300');
+
+    const budgetedButton = await budgetPage.getButtonForBudgeted(categoryName);
+    await expect(budgetedButton).toHaveText(amountToCurrency(123));
   });
 });
