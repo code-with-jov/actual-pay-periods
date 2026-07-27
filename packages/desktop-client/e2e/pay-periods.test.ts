@@ -159,6 +159,59 @@ test.describe('Pay period settings', () => {
       .poll(() => budgetPage.getTotalSpent(), { timeout: 30000 })
       .not.toEqual(0);
   });
+
+  // The test above undoes from the *settings* page, so the budget page
+  // mounts fresh in the new mode. This one undoes while it is already on
+  // screen, exercising the re-initialization path: the config registry is
+  // updated during render, so for one render the requested months are in the
+  // new mode while the fetched bounds are still in the old one.
+  //
+  // Scope note — this is a smoke test, not a regression test for the mixed
+  // bounds throw. Reaching that needs the stale bounds to *start* in the
+  // same calendar year as the requested month, and under Playwright the
+  // clock is pinned to 2017-01-01 with a test file whose history reaches
+  // back into 2016, so the bounds always start in the prior year and the
+  // clamp never takes one end from each mode. The throw itself is covered by
+  // src/components/budget/MonthsContext.test.ts.
+  test('changing the cadence while the budget page is open does not break it', async () => {
+    const settingsPage = await navigation.goToSettingsPage();
+    await settingsPage.enableExperimentalFeature('Pay periods');
+    await configureAndEnablePayPeriods(page);
+
+    const budgetPage = await navigation.goToBudgetPage();
+    await expect(budgetPage.selectedMonthButton).toHaveAttribute(
+      'data-month',
+      CURRENT_PERIOD,
+      { timeout: 60000 },
+    );
+
+    // Undo the preference without leaving the page. The global handler
+    // ignores the shortcut while an input has focus.
+    await page.evaluate(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+    });
+    await page.keyboard.press('Control+z');
+
+    // The page has to survive the switch and settle into calendar months.
+    await expect(budgetPage.selectedMonthButton).toHaveAttribute(
+      'data-month',
+      CURRENT_CALENDAR_MONTH,
+      { timeout: 60000 },
+    );
+
+    await expect(
+      page.getByText('Something went wrong loading this section.'),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText('There was an unrecoverable error in the UI. Sorry!'),
+    ).toHaveCount(0);
+
+    // Alive *and* showing data — a blank but un-crashed page must not pass.
+    await expect(budgetPage.budgetTable).toBeVisible();
+    await expect
+      .poll(() => budgetPage.getTotalSpent(), { timeout: 30000 })
+      .not.toEqual(0);
+  });
 });
 
 test.describe('Budget in pay period mode', () => {
