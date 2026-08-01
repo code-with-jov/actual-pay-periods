@@ -73,7 +73,12 @@ test.describe('Pay period settings', () => {
     await selectPayFrequency(page, PAY_PERIOD_FREQUENCY_LABEL);
     await expect(checkbox).toBeDisabled();
 
-    await page.locator('#pay-period-start-date').fill(PAY_PERIOD_START_DATE);
+    // The date commits on blur/Enter, not per keystroke — a native date
+    // input emits "valid" partial values while the year is being typed.
+    const startDateInput = page.locator('#pay-period-start-date');
+    await startDateInput.fill(PAY_PERIOD_START_DATE);
+    await expect(checkbox).toBeDisabled();
+    await startDateInput.press('Enter');
     await expect(checkbox).toBeEnabled();
 
     // The click is only acknowledged once the server has rebuilt the

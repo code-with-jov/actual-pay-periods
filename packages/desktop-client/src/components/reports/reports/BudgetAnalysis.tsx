@@ -351,8 +351,32 @@ function BudgetAnalysisInternal({ widget }: BudgetAnalysisInternalProps) {
     );
   };
 
+  const title = widget?.meta?.name || t('Budget Analysis');
+
+  // Keep the page chrome (title, mobile back button): unlike the transient
+  // loading state below, this one persists for as long as pay periods are
+  // on, and a bare centered sentence with no way back is a dead end on
+  // mobile.
   if (isBudgetDataUnavailable) {
-    return <BudgetDataUnavailable />;
+    return (
+      <Page
+        header={
+          isNarrowWidth ? (
+            <MobilePageHeader
+              title={title}
+              leftContent={
+                <MobileBackButton onPress={() => navigate('/reports')} />
+              }
+            />
+          ) : (
+            <PageHeader title={title} />
+          )
+        }
+        padding={0}
+      >
+        <BudgetDataUnavailable />
+      </Page>
+    );
   }
 
   if (!data || !allMonths) {
@@ -361,8 +385,6 @@ function BudgetAnalysisInternal({ widget }: BudgetAnalysisInternalProps) {
 
   const latestInterval = data.intervalData[data.intervalData.length - 1];
   const endingBalance = latestInterval?.balance ?? 0;
-
-  const title = widget?.meta?.name || t('Budget Analysis');
 
   const onSaveWidgetName = async (newName: string) => {
     if (!widget) {

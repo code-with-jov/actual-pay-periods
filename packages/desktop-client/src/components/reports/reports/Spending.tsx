@@ -114,6 +114,15 @@ function SpendingInternal({ widget }: SpendingInternalProps) {
 
   const [reportMode, setReportMode] = useState(initialReportMode);
 
+  // If pay periods switch on while this report is open (a sync from
+  // another device, or an undo), a selected Budgeted mode would keep
+  // plotting a flat zero; snap back to the single-month comparison.
+  useEffect(() => {
+    if (payPeriodsBlockBudgetMode && reportMode === 'budget') {
+      setReportMode('single-month');
+    }
+  }, [payPeriodsBlockBudgetMode, reportMode]);
+
   useEffect(() => {
     async function run() {
       const earliestTrans = await send('get-earliest-transaction');

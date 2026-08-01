@@ -31,6 +31,13 @@ export function PayPeriodSettings() {
   // without this the controls would just look frozen for several seconds.
   const [isSaving, setIsSaving] = useState(false);
 
+  // The payday date is committed on blur/Enter, not per keystroke: a native
+  // date input emits a change for every completed segment ('0002-01-05',
+  // '0020-01-05', … while the year is typed), and each one is a "valid"
+  // config — so saving on change kicked off a full budget rebuild per
+  // keystroke and the `isSaving` disable blurred the field mid-typing.
+  const [pendingStartDate, setPendingStartDate] = useState<string | null>(null);
+
   const isEnabled = String(showPayPeriods) === 'true';
   const validConfig = validatePayPeriodConfig({
     payFrequency: payPeriodFrequency,
@@ -57,6 +64,19 @@ export function PayPeriodSettings() {
     // whenever the active pay period configuration changes (see
     // loot-core server/budget/pay-period-config.ts).
     void savePref({ showPayPeriods: isEnabled ? 'false' : 'true' });
+  };
+
+  const commitStartDate = () => {
+    if (pendingStartDate == null) {
+      return;
+    }
+    const nextValue = pendingStartDate;
+    setPendingStartDate(null);
+    // A native date input only produces '' or a complete yyyy-MM-dd, so a
+    // non-empty changed value is a finished entry.
+    if (nextValue && nextValue !== (payPeriodStartDate ?? '')) {
+      void savePref({ payPeriodStartDate: nextValue });
+    }
   };
 
   return (
@@ -90,11 +110,11 @@ export function PayPeriodSettings() {
               <Input
                 id="pay-period-start-date"
                 type="date"
-                value={payPeriodStartDate ?? ''}
+                value={pendingStartDate ?? payPeriodStartDate ?? ''}
                 disabled={isSaving}
-                onChangeValue={newValue =>
-                  void savePref({ payPeriodStartDate: newValue })
-                }
+                onChangeValue={setPendingStartDate}
+                onBlur={commitStartDate}
+                onEnter={commitStartDate}
               />
             </FormField>
           </View>

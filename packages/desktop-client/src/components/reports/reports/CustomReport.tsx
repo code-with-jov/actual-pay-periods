@@ -30,6 +30,7 @@ import { FinancialText } from '#components/FinancialText';
 import { MobileBackButton } from '#components/mobile/MobileBackButton';
 import { MobilePageHeader, Page, PageHeader } from '#components/Page';
 import { PrivacyFilter } from '#components/PrivacyFilter';
+import { BudgetDataUnavailable } from '#components/reports/BudgetDataUnavailable';
 import { ChooseGraph } from '#components/reports/ChooseGraph';
 import {
   defaultsGraphList,
@@ -1033,35 +1034,41 @@ function CustomReportInner({
                 padding: 10,
               }}
             >
-              {graphType !== 'TableGraph' && data && (
-                <View
-                  style={{
-                    alignItems: 'flex-end',
-                    paddingTop: 10,
-                  }}
-                >
+              {graphType !== 'TableGraph' &&
+                data &&
+                !isBudgetDataUnavailable && (
                   <View
                     style={{
-                      ...styles.mediumText,
-                      fontWeight: 500,
-                      marginBottom: 5,
+                      alignItems: 'flex-end',
+                      paddingTop: 10,
                     }}
                   >
-                    <AlignedText
-                      left={<Block>{balanceType}:</Block>}
-                      right={
-                        <FinancialText>
-                          <PrivacyFilter>
-                            {format(data[balanceTypeOp], 'financial')}
-                          </PrivacyFilter>
-                        </FinancialText>
-                      }
-                    />
+                    <View
+                      style={{
+                        ...styles.mediumText,
+                        fontWeight: 500,
+                        marginBottom: 5,
+                      }}
+                    >
+                      <AlignedText
+                        left={<Block>{balanceType}:</Block>}
+                        right={
+                          <FinancialText>
+                            <PrivacyFilter>
+                              {format(data[balanceTypeOp], 'financial')}
+                            </PrivacyFilter>
+                          </FinancialText>
+                        }
+                      />
+                    </View>
                   </View>
-                </View>
-              )}
+                )}
               <View style={{ flex: 1, overflow: 'auto' }}>
-                {data ? (
+                {isBudgetDataUnavailable ? (
+                  // The warning above explains why; rendering the chart too
+                  // would present a $0.00 total as a fact.
+                  <BudgetDataUnavailable />
+                ) : data ? (
                   <ChooseGraph
                     data={data}
                     filters={conditions}
@@ -1083,33 +1090,36 @@ function CustomReportInner({
                 )}
               </View>
             </View>
-            {(viewLegend || viewSummary) && data && !isNarrowWidth && (
-              <View
-                style={{
-                  padding: 10,
-                  minWidth: 300,
-                  textAlign: 'center',
-                }}
-              >
-                {viewSummary && (
-                  <ReportSummary
-                    startDate={startDate}
-                    endDate={endDate}
-                    balanceTypeOp={balanceTypeOp}
-                    data={data}
-                    interval={interval}
-                    intervalsCount={intervals.length}
-                  />
-                )}
-                {viewLegend && (
-                  <ReportLegend
-                    legend={data.legend}
-                    groupBy={groupBy}
-                    interval={interval}
-                  />
-                )}
-              </View>
-            )}
+            {(viewLegend || viewSummary) &&
+              data &&
+              !isBudgetDataUnavailable &&
+              !isNarrowWidth && (
+                <View
+                  style={{
+                    padding: 10,
+                    minWidth: 300,
+                    textAlign: 'center',
+                  }}
+                >
+                  {viewSummary && (
+                    <ReportSummary
+                      startDate={startDate}
+                      endDate={endDate}
+                      balanceTypeOp={balanceTypeOp}
+                      data={data}
+                      interval={interval}
+                      intervalsCount={intervals.length}
+                    />
+                  )}
+                  {viewLegend && (
+                    <ReportLegend
+                      legend={data.legend}
+                      groupBy={groupBy}
+                      interval={interval}
+                    />
+                  )}
+                </View>
+              )}
           </View>
         </View>
       </View>

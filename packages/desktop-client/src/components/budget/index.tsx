@@ -7,6 +7,7 @@ import { styles } from '@actual-app/components/styles';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
+import { getPayPeriodConfig } from '@actual-app/core/shared/pay-period-config';
 import { getPayPeriodDateFilter } from '@actual-app/core/shared/pay-periods';
 import type {
   CategoryEntity,
@@ -75,6 +76,29 @@ export function Budget() {
   const { data: { grouped: categoryGroups } = { grouped: [] } } =
     useCategories();
 
+  // A bounds response is only allowed to land if the cadence it was
+  // requested under is still the active one — a response from before a
+  // cadence change would otherwise overwrite the fresh bounds with a stale
+  // tag, closing the render gate below with nothing left to reopen it.
+  // The registry is the live source of the active cadence, updated during
+  // render by usePayPeriodConfigSync.
+  const applyBoundsIfCurrent = (
+    requestedConfigKey: string,
+    start: string,
+    end: string,
+  ) => {
+    if (requestedConfigKey !== payPeriodConfigKey(getPayPeriodConfig())) {
+      return;
+    }
+    setBounds(prev =>
+      prev.start !== start ||
+      prev.end !== end ||
+      prev.configKey !== requestedConfigKey
+        ? { start, end, configKey: requestedConfigKey }
+        : prev,
+    );
+  };
+
   const init = useEffectEvent(() => {
     async function run() {
       // Captured before the await: if the cadence changes again while this
@@ -83,7 +107,7 @@ export function Budget() {
       // resolves.
       const requestedConfigKey = payPeriodConfigKey(payPeriodConfig);
       const { start, end } = await send('get-budget-bounds');
-      setBounds({ start, end, configKey: requestedConfigKey });
+      applyBoundsIfCurrent(requestedConfigKey, start, end);
 
       await prewarmAllMonths(
         budgetType,
@@ -95,7 +119,20 @@ export function Budget() {
       setInitialized(true);
     }
 
-    void run();
+    void run().catch(error => {
+      console.error('Failed to initialize the budget view', error);
+      // Degrade to a single-column view in the active cadence rather than
+      // an unrecoverable spinner: without bounds in the current mode the
+      // gate below never opens, and nothing else re-runs init.
+      const currentKey = payPeriodConfigKey(getPayPeriodConfig());
+      const fallbackMonth = monthUtils.currentBudgetMonth();
+      setBounds({
+        start: fallbackMonth,
+        end: fallbackMonth,
+        configKey: currentKey,
+      });
+      setInitialized(true);
+    });
   });
 
   // The bounds and the prewarmed cells are expressed in the units of the
@@ -112,11 +149,15 @@ export function Budget() {
 
   const loadBoundBudgets = useEffectEvent(() => {
     const requestedConfigKey = payPeriodConfigKey(payPeriodConfig);
-    void send('get-budget-bounds').then(({ start, end }) => {
-      if (bounds.start !== start || bounds.end !== end) {
-        setBounds({ start, end, configKey: requestedConfigKey });
-      }
-    });
+    void send('get-budget-bounds')
+      .then(({ start, end }) => {
+        applyBoundsIfCurrent(requestedConfigKey, start, end);
+      })
+      .catch(error => {
+        // Refreshing the bounds is an optimization; the init() bounds are
+        // already in place, so a failed refresh is not fatal.
+        console.error('Failed to refresh budget bounds', error);
+      });
   });
   useEffect(() => loadBoundBudgets(), []);
 

@@ -66,7 +66,11 @@ export async function togglePayPeriods(page: Page, enabled: boolean) {
  */
 export async function configureAndEnablePayPeriods(page: Page) {
   await selectPayFrequency(page, PAY_PERIOD_FREQUENCY_LABEL);
-  await page.locator('#pay-period-start-date').fill(PAY_PERIOD_START_DATE);
+  const startDateInput = page.locator('#pay-period-start-date');
+  await startDateInput.fill(PAY_PERIOD_START_DATE);
+  // The date field commits on blur/Enter rather than per keystroke, so the
+  // fill alone doesn't save the pref.
+  await startDateInput.press('Enter');
   await togglePayPeriods(page, true);
 
   setPayPeriodConfig({

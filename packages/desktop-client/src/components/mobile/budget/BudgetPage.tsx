@@ -28,6 +28,7 @@ import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
+import { getPayPeriodConfig } from '@actual-app/core/shared/pay-period-config';
 import {
   getPayPeriodLabel,
   isPayPeriod,
@@ -133,17 +134,33 @@ export function BudgetPage() {
   useEffect(() => {
     async function init() {
       // Captured before the await; a cadence change while this request is
-      // in flight would otherwise mis-tag the bounds it returns.
+      // in flight would otherwise mis-tag the bounds it returns. The
+      // registry (kept live by usePayPeriodConfigSync) is checked again on
+      // resolution so a response from before the change cannot overwrite
+      // the fresh bounds with a stale tag.
       const requestedConfigKey = configKey;
       const { start, end } = await send('get-budget-bounds');
-      setMonthBounds({ start, end, configKey: requestedConfigKey });
+      if (requestedConfigKey === payPeriodConfigKey(getPayPeriodConfig())) {
+        setMonthBounds({ start, end, configKey: requestedConfigKey });
+      }
 
       await prewarmMonth(budgetType, spreadsheet, startMonth);
 
       setInitialized(true);
     }
 
-    void init();
+    void init().catch(error => {
+      console.error('Failed to initialize the mobile budget view', error);
+      // Show the single current column rather than an unrecoverable
+      // spinner; nothing else re-runs this effect.
+      const fallbackMonth = monthUtils.currentBudgetMonth();
+      setMonthBounds({
+        start: fallbackMonth,
+        end: fallbackMonth,
+        configKey: payPeriodConfigKey(getPayPeriodConfig()),
+      });
+      setInitialized(true);
+    });
   }, [budgetType, startMonth, dispatch, spreadsheet, configKey]);
 
   const onBudgetAction = useCallback(
