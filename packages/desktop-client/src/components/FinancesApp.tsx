@@ -391,7 +391,14 @@ export function FinancesApp() {
 
                   <Route
                     path="/accounts"
-                    element={<NarrowAlternate name="Accounts" />}
+                    element={
+                      <ErrorBoundary
+                        FallbackComponent={FeatureErrorFallback}
+                        resetKeys={[location.pathname]}
+                      >
+                        <NarrowAlternate name="Accounts" />
+                      </ErrorBoundary>
+                    }
                   />
 
                   <Route
@@ -422,7 +429,14 @@ export function FinancesApp() {
 
                   <Route
                     path="/categories/:id"
-                    element={<NarrowAlternate name="Category" />}
+                    element={
+                      <ErrorBoundary
+                        FallbackComponent={FeatureErrorFallback}
+                        resetKeys={[location.pathname]}
+                      >
+                        <NarrowAlternate name="Category" />
+                      </ErrorBoundary>
+                    }
                   />
                   {multiuserEnabled && (
                     <Route
