@@ -128,11 +128,13 @@ test.describe('Mobile Budget in pay period mode', () => {
   });
 
   // Mirrors `applies budget template` in budget.mobile.test.ts, but against
-  // a pay period column. The template engine resolves its windows through
-  // budget columns now (see shared/months.ts budgetColumn* helpers), and
-  // this is the end-to-end check that a template applied in a period lands
-  // the right amount.
-  test('applies a budget template within the period', async () => {
+  // a pay period column. The automation created here is a fixed-amount
+  // template, which is deliberately per-column (an allocation per
+  // paycheck), so this checks the apply pipeline reaches the period sheet —
+  // NOT the column-vs-month arithmetic of by/spend/periodic templates,
+  // which is covered by the loot-core suites
+  // (goal-template.pay-periods.test.ts and friends).
+  test('applying a fixed-amount automation lands in the period column', async () => {
     const settingsPage = await navigation.goToSettingsPage();
     await settingsPage.enableExperimentalFeature('Goal templates');
     const uiToggle = page.getByRole('checkbox', {
@@ -196,7 +198,18 @@ test.describe('Mobile Budget in pay period mode', () => {
 
     await expect(accountPage.heading).toContainText(categoryName);
     await expect(accountPage.heading).toContainText(CURRENT_PERIOD_LABEL);
-    await expect(accountPage.transactionList).toBeVisible();
+
+    // The heading is rendered from the month ID, so it alone can't prove
+    // the query was filtered. The list groups transactions under date
+    // headers ('January 05, 2017'): a non-empty list whose headers all fall
+    // inside Jan 1-14 is what shows the period's day-range filter was
+    // actually applied — the test file has spending in December 2016 and
+    // late January that an unfiltered query would surface.
+    await expect(accountPage.transactions.first()).toBeVisible();
+    await expect(accountPage.transactionList).not.toContainText('2016');
+    await expect(accountPage.transactionList).not.toContainText(
+      /January (1[5-9]|2\d|3[01]), 2017/,
+    );
   });
 });
 
@@ -249,27 +262,29 @@ test.describe('Mobile Tracking budget in pay period mode', () => {
 
   // The tracking budget reads its cells through `trackingBudgetMonth`, a
   // different server handler from the envelope budget's — this is the only
-  // coverage that exercises it against pay period sheets.
+  // coverage that exercises it against pay period sheets. `useBudgetType`
+  // is a best-effort click, so each test first proves the switch actually
+  // happened; without that the whole suite could silently run against the
+  // envelope budget and still pass.
   test('renders the tracking budget for the current pay period', async () => {
+    expect(await budgetPage.determineBudgetType()).toBe('Tracking');
     await expect(budgetPage.selectedBudgetMonthButton).toHaveText(
       CURRENT_PERIOD_LABEL,
     );
     await expect(budgetPage.categoryNames.first()).toBeVisible();
   });
 
-  test('shows the savings summary for the period', async () => {
-    const summaryButton = budgetPage.page.getByRole('button', {
-      name: /Saved|Projected savings|Overspent/,
-    });
-    await expect(summaryButton.first()).toBeVisible();
-  });
-
   test('updates a budgeted amount in a pay period', async () => {
+    expect(await budgetPage.determineBudgetType()).toBe('Tracking');
+
     const categoryName = await budgetPage.getCategoryNameForRow(0);
     const budgetMenuModal = await budgetPage.openBudgetMenu(categoryName);
 
     await budgetMenuModal.setBudgetAmount('12300');
 
+    // The budgeted cell is bound to the tracking sheet's `budget-<id>` for
+    // this period column, so the value coming back proves the write and the
+    // read both went through `trackingBudgetMonth` sheets.
     const budgetedButton = await budgetPage.getButtonForBudgeted(categoryName);
     await expect(budgetedButton).toHaveText(amountToCurrency(123));
   });

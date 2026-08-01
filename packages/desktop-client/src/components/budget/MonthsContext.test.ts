@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getValidMonthBounds } from './MonthsContext';
 
 /**
+ * HAZARD CHARACTERISATION, not regression coverage of a fix.
+ *
  * `getValidMonthBounds` clamps the requested window to the budget's bounds
  * by comparing the two as strings. That is fine while both describe the same
  * budgeting mode, but the pay period configuration can change while the
@@ -16,10 +18,16 @@ import { getValidMonthBounds } from './MonthsContext';
  * render the requested months are in the new mode while the bounds fetched
  * from the server are still in the old one.
  *
- * These tests pin down when that produces a mixed pair, which
- * `rangeInclusive` refuses to expand. `Budget` keeps such a pair away from
- * the renderer by tagging its bounds with the cadence they were fetched for
- * (see components/budget/index.tsx).
+ * These tests pin down exactly when that produces a mixed pair, which
+ * `rangeInclusive` refuses to expand: only when the clamp takes one end from
+ * each mode, i.e. when the stale bounds *start* in the same calendar year as
+ * the request. They exercise unmodified code plus the guard in
+ * `rangeInclusive` — they would still pass if the `bounds.configKey` gate in
+ * components/budget/index.tsx (the mitigation that keeps the mixed pair away
+ * from the renderer) were deleted, because they don't render `Budget`. What
+ * they do catch is anyone weakening the `rangeInclusive` mixing guard, and
+ * they document why the hazard is invisible on budgets with prior-year
+ * history.
  */
 describe('getValidMonthBounds with a stale cadence', () => {
   beforeEach(() => {

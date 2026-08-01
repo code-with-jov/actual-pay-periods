@@ -101,11 +101,17 @@ export class MobileBudgetPage {
   }
 
   async determineBudgetType() {
-    return (await this.#getButtonForEnvelopeBudgetSummary({
-      throwIfNotFound: false,
-    })) !== null
-      ? 'Envelope'
-      : 'Tracking';
+    // Wait for either mode's summary button, then report which one is
+    // present. Waiting only for the envelope button and treating its
+    // absence as "Tracking" hangs on a real tracking budget: with no
+    // actionTimeout configured, the wait for the never-appearing envelope
+    // button runs until the test times out.
+    const envelopeButton = this.toBudgetButton.or(this.overbudgetedButton);
+    const trackingButton = this.savedButton
+      .or(this.projectedSavingsButton)
+      .or(this.overspentButton);
+    await envelopeButton.or(trackingButton).first().waitFor();
+    return (await envelopeButton.count()) > 0 ? 'Envelope' : 'Tracking';
   }
 
   async waitFor(...options: Parameters<Locator['waitFor']>) {
