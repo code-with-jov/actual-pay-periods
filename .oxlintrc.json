@@ -400,6 +400,29 @@
     },
     {
       "files": [
+        "packages/loot-core/src/server/budget/**/*",
+        "packages/loot-core/src/shared/**/*",
+        "packages/desktop-client/src/components/budget/**/*",
+        "packages/desktop-client/src/components/mobile/budget/**/*",
+        "packages/desktop-client/src/components/modals/**/*",
+        "packages/desktop-client/src/hooks/**/*"
+      ],
+      "rules": {
+        "actual/no-month-date-concat": "error"
+      }
+    },
+    {
+      "files": [
+        "packages/loot-core/src/shared/months.ts",
+        "packages/loot-core/src/shared/pay-periods.ts",
+        "**/*.test.{js,ts,jsx,tsx}"
+      ],
+      "rules": {
+        "actual/no-month-date-concat": "off"
+      }
+    },
+    {
+      "files": [
         "packages/api/migrations/*",
         "packages/loot-core/migrations/*",
         "packages/sync-server/src/app-gocardless/banks/*.ts",
