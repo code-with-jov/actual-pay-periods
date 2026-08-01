@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 
+import { getPayPeriodDateFilter } from '@actual-app/core/shared/pay-periods';
+import type { PayPeriodConfig } from '@actual-app/core/shared/pay-periods';
 import { q } from '@actual-app/core/shared/query';
 import { isPreviewId } from '@actual-app/core/shared/transactions';
 import type {
@@ -12,6 +14,7 @@ import { SchedulesProvider } from '#hooks/useCachedSchedules';
 import { useCategoryPreviewTransactions } from '#hooks/useCategoryPreviewTransactions';
 import { useDateFormat } from '#hooks/useDateFormat';
 import { useNavigate } from '#hooks/useNavigate';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { useTransactions } from '#hooks/useTransactions';
 import { useTransactionsSearch } from '#hooks/useTransactionsSearch';
 import * as bindings from '#spreadsheet/bindings';
@@ -44,14 +47,15 @@ function TransactionListWithPreviews({
   month,
 }: TransactionListWithPreviewsProps) {
   const navigate = useNavigate();
+  const payPeriodConfig = usePayPeriodConfig();
 
   const baseTransactionsQuery = useCallback(
     () =>
       q('transactions')
         .options({ splits: 'inline' })
-        .filter(getCategoryMonthFilter(category, month))
+        .filter(getCategoryMonthFilter(category, month, payPeriodConfig))
         .select('*'),
-    [category, month],
+    [category, month, payPeriodConfig],
   );
 
   const [transactionsQuery, setTransactionsQuery] = useState(
@@ -121,9 +125,13 @@ function TransactionListWithPreviews({
   );
 }
 
-function getCategoryMonthFilter(category: CategoryEntity, month: string) {
+function getCategoryMonthFilter(
+  category: CategoryEntity,
+  month: string,
+  payPeriodConfig: PayPeriodConfig | null,
+) {
   return {
     category: category.id,
-    date: { $transform: '$month', $eq: month },
+    date: getPayPeriodDateFilter(month, payPeriodConfig),
   };
 }

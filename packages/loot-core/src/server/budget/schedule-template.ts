@@ -6,6 +6,7 @@ import { getRuleForSchedule } from '#server/schedules/app';
 import { prefetchBalanceOfForTransaction } from '#server/transactions/transaction-rules';
 import type { Currency } from '#shared/currencies';
 import * as monthUtils from '#shared/months';
+import { payPeriodsActive } from '#shared/pay-period-config';
 import {
   extractScheduleConds,
   getDateWithSkippedWeekend,
@@ -30,6 +31,14 @@ type ScheduleTemplateTarget = {
   repeat: boolean;
 };
 
+// Note on pay periods: `current_month` may be a pay period ID; `_parse`
+// resolves it to the period's start date and the addMonths/subMonths/
+// sheetForMonth navigation below is period-aware. Distances to a
+// schedule's next occurrence are counted in budget columns (see
+// `budgetColumnDistance`), which is what the spreading and "pay month of"
+// logic downstream divides by. The schedule cadence itself stays
+// calendar-based — schedules are defined in calendar time regardless of
+// the budget column cadence.
 async function createScheduleList(
   templates: ScheduleTemplate[],
   current_month: string,
@@ -138,10 +147,16 @@ async function createScheduleList(
     const isRepeating =
       Object(dateConditions.value) === dateConditions.value &&
       'frequency' in dateConditions.value;
-    const num_months = monthUtils.differenceInCalendarMonths(
-      next_date_string,
-      current_month,
-    );
+    // The budget columns this schedule is scheduled against: the column
+    // being budgeted, and the one the next occurrence falls in.
+    const current_column = monthUtils.budgetMonthFromDate(current_month);
+    const due_column = next_date_string
+      ? monthUtils.budgetMonthFromDate(next_date_string)
+      : null;
+    const num_months =
+      due_column == null
+        ? -1
+        : monthUtils.budgetColumnDistance(current_column, due_column);
     const displayName = scheduleName ?? template.name ?? '';
     if (num_months < 0) {
       //non-repeating schedules could be negative
@@ -163,9 +178,12 @@ async function createScheduleList(
       if (!completed) {
         if (isRepeating) {
           let monthlyTarget = 0;
-          const nextMonth = monthUtils.addMonths(
-            current_month,
-            t[t.length - 1].num_months + 1,
+          // Exclusive end of the due column: the first day of the column
+          // after it. This has to be a day, not a column ID, because it is
+          // compared against occurrence dates — and a pay period ID like
+          // '2026-14' is not comparable to a 'yyyy-MM-dd' day.
+          const dueColumnEnd = monthUtils.dayFromDate(
+            monthUtils.nextMonth(due_column),
           );
           let nextBaseDate = getNextDate(
             dateConditions,
@@ -180,7 +198,7 @@ async function createScheduleList(
                 ),
               )
             : nextBaseDate;
-          while (nextDate < nextMonth) {
+          while (nextDate < dueColumnEnd) {
             monthlyTarget += -target;
             const currentDate = nextBaseDate;
             const oneDayLater = monthUtils.addDays(nextBaseDate, 1);
@@ -261,14 +279,52 @@ function getSinkingContributionBreakdown(
   return { total, perSchedule };
 }
 
-function getMonthlyBaseContribution(schedule: ScheduleTemplateTarget) {
+/**
+ * The number of budget columns that cover the next `months` calendar
+ * months, anchored at the current column. Equals `months` in calendar
+ * mode; with pay periods a month holds several columns, so a per-month
+ * contribution consumed once per column has to be divided by this instead.
+ */
+function columnsInCalendarMonths(currentColumn: string, months: number) {
+  if (!payPeriodsActive()) {
+    return months;
+  }
+  const { start } = monthUtils.budgetColumnDayRange(currentColumn);
+  const intervalEndColumn = monthUtils.budgetMonthFromDate(
+    monthUtils.addMonthsToDay(start, months),
+  );
+  return Math.max(
+    1,
+    monthUtils.budgetColumnDistance(currentColumn, intervalEndColumn),
+  );
+}
+
+function getBaseContributionPerColumn(
+  schedule: ScheduleTemplateTarget,
+  currentColumn: string,
+) {
   let prevDate;
   let intervalMonths;
   switch (schedule.target_frequency) {
+    // For yearly/monthly (and non-recurring) schedules `target` is the full
+    // occurrence amount, so the recurrence interval has to be converted to
+    // budget columns: this contribution is consumed once per column, and
+    // dividing a yearly amount by 12 while adding it ~26 times a year would
+    // over-fund by the cadence factor.
     case 'yearly':
-      return schedule.target / schedule.target_interval / 12;
+      return (
+        schedule.target /
+        columnsInCalendarMonths(currentColumn, schedule.target_interval * 12)
+      );
     case 'monthly':
-      return schedule.target / schedule.target_interval;
+      return (
+        schedule.target /
+        columnsInCalendarMonths(currentColumn, schedule.target_interval)
+      );
+    // For weekly/daily schedules `target` is already column-granular — it
+    // was summed from the occurrences up to the end of the due column — so
+    // the calendar-month divisor stays as-is; converting it too would
+    // scale the contribution down twice.
     case 'weekly':
       prevDate = monthUtils.subWeeks(
         schedule.next_date_string,
@@ -293,13 +349,21 @@ function getMonthlyBaseContribution(schedule: ScheduleTemplateTarget) {
       return schedule.target / intervalMonths;
     default:
       // default to same math as monthly for now for non-reoccuring
-      return schedule.target / schedule.target_interval;
+      return (
+        schedule.target /
+        columnsInCalendarMonths(currentColumn, schedule.target_interval)
+      );
   }
 }
 
-function getSinkingBaseContributionTotal(t: ScheduleTemplateTarget[]) {
+function getSinkingBaseContributionTotal(
+  t: ScheduleTemplateTarget[],
+  currentColumn: string,
+) {
   let total = 0;
-  for (const schedule of t) total += getMonthlyBaseContribution(schedule);
+  for (const schedule of t) {
+    total += getBaseContributionPerColumn(schedule, currentColumn);
+  }
   return total;
 }
 
@@ -333,11 +397,25 @@ export async function runSchedule(
   );
   errors = errors.concat(t.errors);
 
+  // "Pay month of" schedules are funded in full in the budget column their
+  // occurrence lands in and are never pre-funded in earlier columns — only
+  // schedules whose `num_months` is 0 contribute (see getPayMonthOfTotal).
+  //
+  // A monthly schedule with a calendar column always lands in the column
+  // being budgeted, which is why `num_months === 0` holds there. Pay period
+  // columns can be shorter than a month, so the schedule lands in exactly
+  // one of the month's columns: that column funds it and the others fund
+  // nothing, instead of every column of the month funding it in full.
+  // Non-repeating schedules still require `num_months === 0`: they occur
+  // once, so they must be sunk into over the columns leading up to them.
+  const isMonthlyInPayPeriods = c =>
+    payPeriodsActive() && c.target_frequency === 'monthly';
+
   const isPayMonthOf = c =>
     c.full ||
     ((c.target_frequency === 'monthly' || !c.target_frequency) &&
       c.target_interval === 1 &&
-      c.num_months === 0) ||
+      (c.num_months === 0 || isMonthlyInPayPeriods(c))) ||
     (c.target_frequency === 'weekly' && c.target_interval <= 4) ||
     (c.target_frequency === 'daily' && c.target_interval <= 31) ||
     isTrackingBudget();
@@ -352,8 +430,10 @@ export async function runSchedule(
   const numSubMonthly = t.t.filter(isSubMonthly).length;
   const totalPayMonthOf = getPayMonthOfTotal(t_payMonthOf);
   const totalSinking = getSinkingTotal(t_sinking);
-  const totalSinkingBaseContribution =
-    getSinkingBaseContributionTotal(t_sinking);
+  const totalSinkingBaseContribution = getSinkingBaseContributionTotal(
+    t_sinking,
+    current_month,
+  );
   const lastMonthGoal = await getSheetValue(
     monthUtils.sheetForMonth(monthUtils.subMonths(current_month, 1)),
     `goal-${category.id}`,
@@ -388,7 +468,10 @@ export async function runSchedule(
       }
     }
     for (const c of t_sinking) {
-      addContribution(c.template, getMonthlyBaseContribution(c));
+      addContribution(
+        c.template,
+        getBaseContributionPerColumn(c, current_month),
+      );
     }
   } else {
     const { total: totalSinkingContribution, perSchedule: sinkingPerSchedule } =

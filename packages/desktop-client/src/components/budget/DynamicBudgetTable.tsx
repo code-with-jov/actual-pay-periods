@@ -110,7 +110,7 @@ const DynamicBudgetTable = ({
     () => {
       _onMonthSelect(
         monthUtils.subMonths(
-          monthUtils.currentMonth(),
+          monthUtils.currentBudgetMonth(),
           type === 'envelope'
             ? Math.floor((numMonths - 1) / 2)
             : numMonths === 2

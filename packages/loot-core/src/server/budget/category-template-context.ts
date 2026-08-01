@@ -3,6 +3,7 @@ import * as db from '#server/db';
 import { getCurrency } from '#shared/currencies';
 import type { Currency } from '#shared/currencies';
 import * as monthUtils from '#shared/months';
+import { isPayPeriod } from '#shared/pay-periods';
 import { q } from '#shared/query';
 import { amountToInteger, integerToAmount } from '#shared/util';
 import type { CategoryEntity } from '#types/models';
@@ -32,6 +33,25 @@ import { getActiveSchedules } from './statements';
 
 export class CategoryTemplateContext {
   /*----------------------------------------------------------------------------
+   * Note on pay periods: `month` may be a pay period ID ('YYYY-MM' with
+   * MM >= 13). Navigation between budget columns (prevMonth/subMonths/
+   * sheetForMonth/etc.) is period-aware.
+   *
+   * Template *definitions* stay calendar-based — a goal is written as "by
+   * August", "every 2 months", "$50 a week" whatever the column cadence is —
+   * but anything that measures one of those windows against the budget has
+   * to be converted to budget columns first, via
+   * `monthUtils.budgetColumnDayRange` (for day comparisons) or
+   * `monthUtils.budgetColumnDistance` / `budgetColumnForCalendarMonth` (for
+   * spans). Two failure modes to keep in mind:
+   *
+   * - Comparing a day against `month` directly is only valid for calendar
+   *   months. A period ID sorts after every day of its year
+   *   ('2026-16' > '2026-12-31'), so such a test is silently always-true or
+   *   always-false rather than wrong-by-a-bit.
+   * - Dividing an amount by a *calendar* span yields a per-column
+   *   contribution that is too large, because a month holds several columns.
+   *----------------------------------------------------------------------------
    * Using This Class:
    * 1. instantiate via `await categoryTemplate.init(templates, categoryID, month)`;
    *    templates: all templates for this category (including templates and goals)
@@ -589,10 +609,10 @@ export class CategoryTemplateContext {
       }
 
       if (limitDef.period === 'daily') {
-        const numDays = monthUtils.differenceInCalendarDays(
-          monthUtils.addMonths(this.month, 1),
-          this.month,
-        );
+        const { start: columnStart, end: columnEnd } =
+          monthUtils.budgetColumnDayRange(this.month);
+        const numDays =
+          monthUtils.differenceInCalendarDays(columnEnd, columnStart) + 1;
         this.limitAmount +=
           amountToInteger(limitDef.amount, this.currency.decimalPlaces) *
           numDays;
@@ -600,23 +620,48 @@ export class CategoryTemplateContext {
         if (!limitDef.start) {
           throw new Error('Weekly limit requires a start date (YYYY-MM-DD)');
         }
-        const nextMonth = monthUtils.nextMonth(this.month);
+        // Count the weekly occurrences that land inside this budget
+        // column. Comparing the days against `this.month` directly only
+        // works when the column is a calendar month: a pay period ID like
+        // '2026-16' sorts after every day in 2026 ('2026-16' > '2026-12-31'),
+        // so `week >= this.month` was never true and the limit resolved to
+        // zero — which reads as "limit already met" and budgets nothing.
+        const { start: columnStart, end: columnEnd } =
+          monthUtils.budgetColumnDayRange(this.month);
         let week = limitDef.start;
         const baseLimit = amountToInteger(
           limitDef.amount,
           this.currency.decimalPlaces,
         );
-        while (week < nextMonth) {
-          if (week >= this.month) {
+        while (week <= columnEnd) {
+          if (week >= columnStart) {
             this.limitAmount += baseLimit;
           }
           week = monthUtils.addWeeks(week, 1);
         }
       } else if (limitDef.period === 'monthly') {
-        this.limitAmount = amountToInteger(
+        const monthlyAmount = amountToInteger(
           limitDef.amount,
           this.currency.decimalPlaces,
         );
+        if (isPayPeriod(this.month)) {
+          // A monthly limit is a cap on a month's spending, so a column
+          // that covers only part of a month gets only that share — a
+          // biweekly column capped at the full monthly amount would quietly
+          // permit ~2.2x the stated monthly spend. (Contrast a fixed
+          // template amount, which is deliberately per-column: an
+          // allocation per paycheck, not a monthly total.)
+          const { start: columnStart, end: columnEnd } =
+            monthUtils.budgetColumnDayRange(this.month);
+          const numDays =
+            monthUtils.differenceInCalendarDays(columnEnd, columnStart) + 1;
+          const AVERAGE_DAYS_PER_MONTH = 365.25 / 12;
+          this.limitAmount = Math.round(
+            (monthlyAmount * numDays) / AVERAGE_DAYS_PER_MONTH,
+          );
+        } else {
+          this.limitAmount = monthlyAmount;
+        }
       } else {
         throw new Error('Invalid limit period. Check template syntax');
       }
@@ -708,12 +753,25 @@ export class CategoryTemplateContext {
     );
     const period = template.period.period;
     const numPeriods = template.period.amount;
+    // The day range of this budget column — the pay period's own days while
+    // pay periods are active. Every comparison below is day-against-day:
+    // comparing days against the column ID directly only holds for calendar
+    // months, because a period ID like '2026-16' sorts after every day of
+    // 2026 and the occurrence walk then ran off the end of the year and
+    // budgeted nothing at all.
+    const { start: columnStart, end: columnEnd } =
+      monthUtils.budgetColumnDayRange(templateContext.month);
     let date =
       template.starting && template.starting.length > 0
         ? template.starting
-        : monthUtils.firstDayOfMonth(templateContext.month);
+        : columnStart;
 
-    let dateShiftFunction;
+    // Every shift must return a full 'yyyy-MM-dd' day that preserves the
+    // anchor day-of-month: the walk below is day-against-day, and a column
+    // can start mid-month, so an occurrence snapped to the 1st can land in
+    // the wrong column — or fire twice in one column (the anchor day and
+    // the following 1st both inside it).
+    let dateShiftFunction: (date: string, by: number) => string;
     switch (period) {
       case 'day':
         dateShiftFunction = monthUtils.addDays;
@@ -722,30 +780,26 @@ export class CategoryTemplateContext {
         dateShiftFunction = monthUtils.addWeeks;
         break;
       case 'month':
-        dateShiftFunction = monthUtils.addMonths;
+        dateShiftFunction = monthUtils.addMonthsToDay;
         break;
       case 'year':
-        // the addYears function doesn't return the month number, so use addMonths
-        dateShiftFunction = (date: string | Date, numPeriods: number) =>
-          monthUtils.addMonths(date, numPeriods * 12);
+        dateShiftFunction = (date: string, numPeriods: number) =>
+          monthUtils.addMonthsToDay(date, numPeriods * 12);
         break;
       default:
         throw new Error(`Unrecognized periodic period: ${String(period)}`);
     }
 
     //shift the starting date until its in our month or in the future
-    while (templateContext.month > date) {
+    while (date < columnStart) {
       date = dateShiftFunction(date, numPeriods);
     }
 
-    if (
-      monthUtils.differenceInCalendarMonths(templateContext.month, date) < 0
-    ) {
+    if (date > columnEnd) {
       return 0;
     } // nothing needed this month
 
-    const nextMonth = monthUtils.addMonths(templateContext.month, 1);
-    while (date < nextMonth) {
+    while (date <= columnEnd) {
       toBudget += amount;
       date = dateShiftFunction(date, numPeriods);
     }
@@ -757,6 +811,10 @@ export class CategoryTemplateContext {
     template: SpendTemplate,
     templateContext: CategoryTemplateContext,
   ): Promise<number> {
+    // `template.from` and `template.month` are calendar months: a `spend`
+    // goal is written as "save $X by August, starting in March" whatever the
+    // budget column cadence is. The `repeat` shift below therefore stays in
+    // calendar months, and the columns are derived from the result.
     let fromMonth = `${template.from}`;
     let toMonth = `${template.month}`;
     let alreadyBudgeted = templateContext.fromLastMonth;
@@ -766,24 +824,29 @@ export class CategoryTemplateContext {
     const repeat = template.annual
       ? (template.repeat || 1) * 12
       : template.repeat;
-    let m = monthUtils.differenceInCalendarMonths(
-      toMonth,
+    let m = monthUtils.budgetColumnDistance(
       templateContext.month,
+      monthUtils.budgetColumnForCalendarMonth(toMonth, 'end'),
     );
     if (repeat && m < 0) {
       while (m < 0) {
         toMonth = monthUtils.addMonths(toMonth, repeat);
         fromMonth = monthUtils.addMonths(fromMonth, repeat);
-        m = monthUtils.differenceInCalendarMonths(
-          toMonth,
+        m = monthUtils.budgetColumnDistance(
           templateContext.month,
+          monthUtils.budgetColumnForCalendarMonth(toMonth, 'end'),
         );
       }
     }
 
+    // Walk budget columns, not calendar months: in pay period mode
+    // `sheetForMonth('2026-03')` names a sheet that was never created, and a
+    // missing sheet reads back as zero rather than raising — so every
+    // contribution already made was silently discarded and the goal
+    // re-budgeted its full remaining amount in every period.
     for (
-      let m = fromMonth;
-      monthUtils.differenceInCalendarMonths(templateContext.month, m) > 0;
+      let m = monthUtils.budgetColumnForCalendarMonth(fromMonth, 'start');
+      m < templateContext.month;
       m = monthUtils.addMonths(m, 1)
     ) {
       const sheetName = monthUtils.sheetForMonth(m);
@@ -807,9 +870,12 @@ export class CategoryTemplateContext {
       }
     }
 
-    const numMonths = monthUtils.differenceInCalendarMonths(
-      toMonth,
+    // Spread what is left over the budget columns still to come, not the
+    // calendar months: with several columns per month, dividing by months
+    // funds the goal a full cadence early and starves everything else.
+    const numMonths = monthUtils.budgetColumnDistance(
       templateContext.month,
+      monthUtils.budgetColumnForCalendarMonth(toMonth, 'end'),
     );
     const target = amountToInteger(
       template.amount,
@@ -918,23 +984,43 @@ export class CategoryTemplateContext {
     //find shortest time period
     for (let i = 0; i < byTemplates.length; i++) {
       const template = byTemplates[i];
+      // `template.month` is a calendar month ("by August") and `repeat` is a
+      // count of calendar months, but the amounts below are divided by this
+      // span to get a per-*column* contribution. With several columns per
+      // month a calendar span funds the goal a whole cadence early, so both
+      // the span and the repeat are measured in budget columns instead. The
+      // target month keeps advancing in calendar months, which is how the
+      // template is written.
       let targetMonth = `${template.month}`;
-      const period = template.annual
+      const calendarPeriod = template.annual
         ? (template.repeat || 1) * 12
         : template.repeat != null
           ? template.repeat
           : null;
-      let numMonths = monthUtils.differenceInCalendarMonths(
-        targetMonth,
+      let numMonths = monthUtils.budgetColumnDistance(
         templateContext.month,
+        monthUtils.budgetColumnForCalendarMonth(targetMonth, 'end'),
       );
-      while (numMonths < 0 && period) {
-        targetMonth = monthUtils.addMonths(targetMonth, period);
-        numMonths = monthUtils.differenceInCalendarMonths(
-          targetMonth,
+      while (numMonths < 0 && calendarPeriod) {
+        targetMonth = monthUtils.addMonths(targetMonth, calendarPeriod);
+        numMonths = monthUtils.budgetColumnDistance(
           templateContext.month,
+          monthUtils.budgetColumnForCalendarMonth(targetMonth, 'end'),
         );
       }
+      // One repeat cycle, in budget columns: the columns between the
+      // previous occurrence of this goal and the current target. Equals
+      // `calendarPeriod` exactly when pay periods are off.
+      const period =
+        calendarPeriod == null
+          ? null
+          : monthUtils.budgetColumnDistance(
+              monthUtils.budgetColumnForCalendarMonth(
+                monthUtils.subMonths(targetMonth, calendarPeriod),
+                'end',
+              ),
+              monthUtils.budgetColumnForCalendarMonth(targetMonth, 'end'),
+            );
       savedInfo.push({ numMonths, period });
       if (
         workingShortNumMonths === undefined ||

@@ -138,6 +138,8 @@ These are types.
 
 ## Budgets
 
+If the budget file uses [pay periods](../budgeting/pay-periods.md), these methods work with pay period identifiers such as `2026-13` instead of calendar months, so pass values returned by `getBudgetMonths` rather than month strings you build yourself.
+
 #### `getBudgetMonths`
 
 <Method name="getBudgetMonths" args={[]}  returns="Promise<month[]>" />

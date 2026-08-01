@@ -193,7 +193,15 @@ function undoMessage(message, oldData) {
           return { ...message, value: 0 };
         }
         return null;
-      } else if (message.dataset === 'notes') {
+      } else if (
+        message.dataset === 'notes' ||
+        // `preferences` is (id, value) with no tombstone column, so the
+        // fallback below would emit `SET tombstone = 1` and abort the
+        // whole transaction with `invalid-schema`. Undoing a preference
+        // that didn't exist before means clearing its value, which every
+        // reader already treats as unset.
+        message.dataset === 'preferences'
+      ) {
         return { ...message, value: null };
       }
 
@@ -252,6 +260,9 @@ function redoResurrections(messages, oldData): Message[] {
         'notes',
         'category_mapping',
         'payee_mapping',
+        // Like the tables above, `preferences` has no tombstone column —
+        // resurrecting a row there would abort the transaction.
+        'preferences',
       ].includes(message.dataset)
     ) {
       resurrect.add(message.dataset + '.' + message.row);

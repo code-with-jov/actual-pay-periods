@@ -1,11 +1,18 @@
+import {
+  resetPayPeriodConfigForTesting,
+  setPayPeriodConfig,
+} from '@actual-app/core/shared/pay-period-config';
 import type {
   CategoryEntity,
   CategoryGroupEntity,
   RuleConditionEntity,
 } from '@actual-app/core/types/models';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { filterCategoriesByConditions } from './budgetDataQuery';
+import {
+  fetchBudgetData,
+  filterCategoriesByConditions,
+} from './budgetDataQuery';
 
 const categoryGroups = [
   { id: 'group-bills', name: 'Bills' },
@@ -98,5 +105,28 @@ describe('filterCategoriesByConditions', () => {
     );
 
     expect(result.map(category => category.id)).toEqual(['cat-dining']);
+  });
+});
+
+describe('fetchBudgetData while budgeting by pay period', () => {
+  afterEach(() => {
+    resetPayPeriodConfigForTesting();
+  });
+
+  it('returns no data instead of querying calendar months', async () => {
+    setPayPeriodConfig({ payFrequency: 'biweekly', startDate: '2024-01-05' });
+
+    const result = await fetchBudgetData({
+      startDate: '2024-01-01',
+      endDate: '2024-03-31',
+      interval: 'Monthly',
+      categories,
+      categoryGroups,
+    });
+
+    // Budgeted amounts live in pay period columns, so there is nothing to
+    // report for these months. Crucially the months are never requested:
+    // `send` is unmocked here, so any attempt would reject.
+    expect(result).toEqual({ assets: [], debts: [] });
   });
 });

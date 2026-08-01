@@ -80,7 +80,7 @@ function getDefaultWeeklyStart(entries: AutomationEntry[]): string {
       (template.type === 'by' || template.type === 'spend') &&
       template.month
     ) {
-      starts.push(`${template.month}-01`);
+      starts.push(firstDayOfMonth(template.month));
     }
   }
 

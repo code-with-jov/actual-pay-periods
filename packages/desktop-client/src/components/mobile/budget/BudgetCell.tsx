@@ -66,9 +66,7 @@ export function BudgetCell<
             options: {
               id,
               name:
-                category.name +
-                ' - ' +
-                monthUtils.format(month, "MMMM ''yy", locale),
+                category.name + ' - ' + monthUtils.nameForMonth(month, locale),
               onSave: onSaveNotes,
             },
           },
