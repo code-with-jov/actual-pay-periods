@@ -110,22 +110,36 @@ describe('pay period awareness', () => {
   it('budgetColumnDistance counts columns, and reports past targets as negative', () => {
     expect(monthUtils.budgetColumnDistance('2024-13', '2024-13')).toBe(0);
     expect(monthUtils.budgetColumnDistance('2024-13', '2024-16')).toBe(3);
-    expect(monthUtils.budgetColumnDistance('2024-16', '2024-13')).toBeLessThan(
-      0,
-    );
+    // A true signed distance, not a -1 sentinel: callers divide by these
+    // spans, so the magnitude matters as much as the sign.
+    expect(monthUtils.budgetColumnDistance('2024-16', '2024-13')).toBe(-3);
     // Across a year boundary: the last period of 2024 to the first of 2025.
     const lastOf2024 = monthUtils.getYearEnd('2024-13');
     expect(monthUtils.budgetColumnDistance(lastOf2024, '2025-13')).toBe(1);
   });
 
   it('budgetColumnForCalendarMonth maps a calendar target onto a column', () => {
-    // A goal due "by February" may use every column February contains, so
-    // the deadline is the column holding Feb 29.
+    // Hard-coded, not derived through budgetMonthFromDate — the helper is
+    // implemented in terms of it, so a derived expectation would cancel out
+    // any shared error. Biweekly from Jan 5: '2024-16' is Feb 16 - Feb 29
+    // and '2024-14' is Jan 19 - Feb 1.
     expect(monthUtils.budgetColumnForCalendarMonth('2024-02', 'end')).toBe(
-      monthUtils.budgetMonthFromDate('2024-02-29'),
+      '2024-16',
     );
     expect(monthUtils.budgetColumnForCalendarMonth('2024-02', 'start')).toBe(
-      monthUtils.budgetMonthFromDate('2024-02-01'),
+      '2024-14',
+    );
+  });
+
+  it('addMonthsToDay preserves the day-of-month, clamping short months', () => {
+    expect(monthUtils.addMonthsToDay('2024-01-15', 1)).toBe('2024-02-15');
+    expect(monthUtils.addMonthsToDay('2024-01-31', 1)).toBe('2024-02-29');
+    expect(monthUtils.addMonthsToDay('2024-06-15', -3)).toBe('2024-03-15');
+  });
+
+  it('budgetColumnDistance fails loudly on a runaway pair', () => {
+    expect(() => monthUtils.budgetColumnDistance('2024-13', '2500-13')).toThrow(
+      /exceeds/,
     );
   });
 

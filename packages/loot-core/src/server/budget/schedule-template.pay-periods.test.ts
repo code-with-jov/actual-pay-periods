@@ -188,6 +188,35 @@ describe('runSchedule with pay periods', () => {
     expect(result.to_budget).toBe(Math.round(60000 / (columnsUntilDue + 1)));
   });
 
+  it('spreads a full sinking fund over the columns of the year, not 12 months', async () => {
+    // A yearly $1,200 schedule whose sinking fund is already full: the
+    // engine keeps contributing the steady-state base amount. That base is
+    // consumed once per budget column, so it has to be the target divided
+    // by the ~52 weekly columns of the recurrence interval — dividing by 12
+    // calendar months while adding it every column funded ~$5,200/yr.
+    mockSingleSchedule({
+      start: '2024-06-15',
+      amount: -120000,
+      frequency: 'yearly',
+    });
+
+    const result = await runSchedule(
+      templateLines,
+      '2024-13',
+      120000, // balance already covers the full target
+      0,
+      0,
+      0,
+      [],
+      defaultCategory,
+      defaultCurrency,
+    );
+    expect(result.errors).toHaveLength(0);
+    // Jan 1 + 12 months lands in '2024-65' (the Dec 30 - Jan 5 week): 52
+    // columns → $1,200 / 52 ≈ $23.08 per column.
+    expect(result.to_budget).toBe(2308);
+  });
+
   it('reports a schedule whose next occurrence is in an earlier period as past', async () => {
     vi.mocked(db.first).mockResolvedValue({ id: 1, completed: 0 });
     vi.mocked(getRuleForSchedule).mockResolvedValue(

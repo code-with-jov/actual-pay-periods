@@ -167,6 +167,47 @@ describe('runPeriodic in pay period mode', () => {
       CategoryTemplateContext.runPeriodic(noStartDate, makeContext('2024-13')),
     ).toBe(7000);
   });
+
+  it('a monthly cadence fires once per monthly period, keeping the anchor day', () => {
+    // A monthly pay cycle anchored on the 15th: '2024-13' runs Jan 15 -
+    // Feb 14. Shifting the occurrence with a day-losing month step snaps
+    // Feb 15 to Feb 1 — still inside the column — and a "$100 every month"
+    // template budgeted $200.
+    setPayPeriodConfig({ payFrequency: 'monthly', startDate: '2024-01-15' });
+    const monthlyTemplate = {
+      ...weeklyTemplate,
+      amount: 100,
+      period: { period: 'month' as const, amount: 1 },
+      starting: '2024-01-15',
+    };
+
+    expect(
+      CategoryTemplateContext.runPeriodic(
+        monthlyTemplate,
+        makeContext('2024-13'),
+      ),
+    ).toBe(10000);
+  });
+
+  it('keeps a mid-month monthly occurrence out of the column holding the 1st', () => {
+    // Biweekly from Jan 1: '2024-15' is Jan 29 - Feb 11. The next
+    // occurrence after Jan 29 is Feb 29 — outside the column. Snapping it
+    // to Feb 1 pulled it back inside and doubled the amount.
+    setPayPeriodConfig({ payFrequency: 'biweekly', startDate: '2024-01-01' });
+    const monthlyTemplate = {
+      ...weeklyTemplate,
+      amount: 100,
+      period: { period: 'month' as const, amount: 1 },
+      starting: '2024-01-29',
+    };
+
+    expect(
+      CategoryTemplateContext.runPeriodic(
+        monthlyTemplate,
+        makeContext('2024-15'),
+      ),
+    ).toBe(10000);
+  });
 });
 
 describe('weekly `up to` limit in pay period mode', () => {
@@ -226,6 +267,41 @@ describe('weekly `up to` limit in pay period mode', () => {
     // Seven days in a weekly period, not 31 in January.
     expect(await period.runTemplatesForPriority(1, 100000, 100000)).toBe(7000);
   });
+
+  it('pro-rates a monthly limit to the column, keeping the monthly cap honest', async () => {
+    const monthlyLimit: Template = {
+      type: 'simple',
+      limit: { amount: 600, hold: false, period: 'monthly' },
+      directive: 'template',
+      priority: 1,
+    };
+
+    // Calendar mode: the full monthly cap, unchanged.
+    resetPayPeriodConfigForTesting();
+    const calendar = new TestCategoryTemplateContext(
+      [monthlyLimit],
+      category,
+      '2024-01',
+      0,
+      0,
+    );
+    expect(await calendar.runTemplatesForPriority(1, 100000, 100000)).toBe(
+      60000,
+    );
+
+    // A weekly column gets a week's share of the cap: $600 x 7 / 30.4375.
+    // Applying the full monthly amount to every column quietly permitted
+    // ~4.3x the stated monthly spend on this cadence.
+    setPayPeriodConfig(weeklyConfig);
+    const period = new TestCategoryTemplateContext(
+      [monthlyLimit],
+      category,
+      '2024-13',
+      0,
+      0,
+    );
+    expect(await period.runTemplatesForPriority(1, 100000, 100000)).toBe(13799);
+  });
 });
 
 describe('runSpend in pay period mode', () => {
@@ -259,15 +335,10 @@ describe('runSpend in pay period mode', () => {
       makeContext('2024-13'),
     );
 
-    const calendarMonthsRemaining = 2;
-    const perCalendarMonth = Math.round(120000 / (calendarMonthsRemaining + 1));
-    expect(perColumn).toBeLessThan(perCalendarMonth);
-    expect(perColumn).toBeGreaterThan(0);
-
-    // Contributing `perColumn` in every column between now and the deadline
-    // reaches the target without overshooting by a whole cadence.
-    const columnsRemaining = Math.round(120000 / perColumn) - 1;
-    expect(columnsRemaining).toBeGreaterThan(calendarMonthsRemaining);
+    // The deadline is the column containing Mar 31 ('2024-25'), 12 columns
+    // out, so 13 columns share the $1,200: $92.31 each. The calendar-month
+    // answer would be $1,200 / 3 = $400.
+    expect(perColumn).toBe(9231);
   });
 
   it('reads the budget columns already elapsed, not calendar sheets', async () => {
@@ -331,8 +402,9 @@ describe('runBy in pay period mode', () => {
     const { toBudget: periodToBudget } = CategoryTemplateContext.runBy(
       makeContext('2024-13', { templates: [byTemplate] }),
     );
-    expect(periodToBudget).toBeLessThan(calendarToBudget);
-    expect(periodToBudget).toBeGreaterThan(0);
+    // Deadline column '2024-25' (the week of Mar 25), 12 columns out:
+    // $600 / 13 = $46.15 per column.
+    expect(periodToBudget).toBe(4615);
   });
 
   it('measures an annual repeat in budget columns too', () => {
@@ -340,10 +412,27 @@ describe('runBy in pay period mode', () => {
     const annual = { ...byTemplate, annual: true, repeat: 1 };
 
     // A target already in the past rolls forward by the repeat rather than
-    // reporting a negative span and funding nothing.
+    // reporting a negative span and funding nothing: '2024-03' becomes
+    // '2025-03', 44 columns out from the week of Jun 1 → $600 / 45.
     const { toBudget } = CategoryTemplateContext.runBy(
       makeContext(periodContaining('2024-06-01'), { templates: [annual] }),
     );
-    expect(toBudget).toBeGreaterThan(0);
+    expect(toBudget).toBe(1333);
+  });
+
+  it('a past non-repeating goal yields a finite number, not Infinity', () => {
+    setPayPeriodConfig(weeklyConfig);
+
+    // '2024-01' resolves to deadline column '2024-17' (the week holding
+    // Jan 31); the current column is 17 columns later. A distance clamped
+    // to -1 made the divisor (shortNumMonths + 1) zero, and
+    // Math.round(x / 0) = Infinity flowed on into the budget cell. The true
+    // signed distance matches calendar-mode semantics: $600 / -16.
+    const pastTarget = { ...byTemplate, month: '2024-01' };
+    const { toBudget } = CategoryTemplateContext.runBy(
+      makeContext(periodContaining('2024-06-01'), { templates: [pastTarget] }),
+    );
+    expect(Number.isFinite(toBudget)).toBe(true);
+    expect(toBudget).toBe(-3750);
   });
 });

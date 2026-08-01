@@ -283,6 +283,20 @@ export function addWeeks(date: DateLike, n: number): string {
   return d.format(d.addWeeks(_parse(date), n), 'yyyy-MM-dd');
 }
 
+/**
+ * Shifts a day by whole calendar months, preserving the day-of-month
+ * (clamped in shorter months: Jan 31 + 1 month = Feb 28/29).
+ *
+ * `addMonths` cannot be used for this: it returns a 'yyyy-MM' month, and
+ * re-parsing that loses the day — every step snaps to the 1st. That is
+ * harmless when the consumer only cares which calendar month the result is
+ * in, but a budget column can start mid-month (a pay period), where the
+ * 1st and the anchor day can fall in different columns.
+ */
+export function addMonthsToDay(day: DateLike, n: number): string {
+  return d.format(d.addMonths(_parse(day), n), 'yyyy-MM-dd');
+}
+
 export function differenceInCalendarMonths(
   month1: DateLike,
   month2: DateLike,
@@ -429,17 +443,35 @@ export function budgetColumnDayRange(month: string): {
 // target month far outside the budget) spinning forever.
 const MAX_BUDGET_COLUMN_DISTANCE = 10000;
 
+function countColumnSteps(from: string, to: string): number {
+  let distance = 0;
+  let column = from;
+  while (column < to) {
+    if (distance >= MAX_BUDGET_COLUMN_DISTANCE) {
+      // Failing loudly beats returning the cap as though it were a real
+      // distance — callers divide by this value.
+      throw new Error(
+        `Budget column distance from '${from}' to '${to}' exceeds ` +
+          `${MAX_BUDGET_COLUMN_DISTANCE} columns; the pair is likely malformed`,
+      );
+    }
+    column = nextMonth(column);
+    distance += 1;
+  }
+  return distance;
+}
+
 /**
  * Distance from one budget column to another, measured in budget columns.
+ * Negative when `to` is before `from`, exactly like the calendar-month
+ * difference — callers divide by these spans, so the sign and the magnitude
+ * both have to be real.
  *
  * With pay periods several columns can share a calendar month, so a
  * calendar-month distance reports 0 for every column of that month — and a
  * goal that divides by it then funds itself in full in each one. `nextMonth`
  * steps pay periods while they are active, so counting steps is correct in
  * both modes; in calendar mode the count is the calendar-month difference.
- *
- * Negative distances are reported as -1: callers only test them for sign
- * (a target already in the past), so there is no need to walk backwards.
  */
 export function budgetColumnDistance(from: string, to: string): number {
   if (!payPeriodsActive()) {
@@ -448,17 +480,9 @@ export function budgetColumnDistance(from: string, to: string): number {
   if (to === from) {
     return 0;
   }
-  if (to < from) {
-    return -1;
-  }
-
-  let distance = 0;
-  let column = from;
-  while (column < to && distance < MAX_BUDGET_COLUMN_DISTANCE) {
-    column = nextMonth(column);
-    distance += 1;
-  }
-  return distance;
+  // Within one mode the IDs order lexicographically, so this picks the
+  // walking direction.
+  return to < from ? -countColumnSteps(to, from) : countColumnSteps(from, to);
 }
 
 /**

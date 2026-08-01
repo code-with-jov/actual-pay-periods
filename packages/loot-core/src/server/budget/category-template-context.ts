@@ -3,6 +3,7 @@ import * as db from '#server/db';
 import { getCurrency } from '#shared/currencies';
 import type { Currency } from '#shared/currencies';
 import * as monthUtils from '#shared/months';
+import { isPayPeriod } from '#shared/pay-periods';
 import { q } from '#shared/query';
 import { amountToInteger, integerToAmount } from '#shared/util';
 import type { CategoryEntity } from '#types/models';
@@ -608,10 +609,10 @@ export class CategoryTemplateContext {
       }
 
       if (limitDef.period === 'daily') {
-        const numDays = monthUtils.differenceInCalendarDays(
-          monthUtils.addMonths(this.month, 1),
-          this.month,
-        );
+        const { start: columnStart, end: columnEnd } =
+          monthUtils.budgetColumnDayRange(this.month);
+        const numDays =
+          monthUtils.differenceInCalendarDays(columnEnd, columnStart) + 1;
         this.limitAmount +=
           amountToInteger(limitDef.amount, this.currency.decimalPlaces) *
           numDays;
@@ -639,10 +640,28 @@ export class CategoryTemplateContext {
           week = monthUtils.addWeeks(week, 1);
         }
       } else if (limitDef.period === 'monthly') {
-        this.limitAmount = amountToInteger(
+        const monthlyAmount = amountToInteger(
           limitDef.amount,
           this.currency.decimalPlaces,
         );
+        if (isPayPeriod(this.month)) {
+          // A monthly limit is a cap on a month's spending, so a column
+          // that covers only part of a month gets only that share — a
+          // biweekly column capped at the full monthly amount would quietly
+          // permit ~2.2x the stated monthly spend. (Contrast a fixed
+          // template amount, which is deliberately per-column: an
+          // allocation per paycheck, not a monthly total.)
+          const { start: columnStart, end: columnEnd } =
+            monthUtils.budgetColumnDayRange(this.month);
+          const numDays =
+            monthUtils.differenceInCalendarDays(columnEnd, columnStart) + 1;
+          const AVERAGE_DAYS_PER_MONTH = 365.25 / 12;
+          this.limitAmount = Math.round(
+            (monthlyAmount * numDays) / AVERAGE_DAYS_PER_MONTH,
+          );
+        } else {
+          this.limitAmount = monthlyAmount;
+        }
       } else {
         throw new Error('Invalid limit period. Check template syntax');
       }
@@ -747,7 +766,12 @@ export class CategoryTemplateContext {
         ? template.starting
         : columnStart;
 
-    let dateShiftFunction;
+    // Every shift must return a full 'yyyy-MM-dd' day that preserves the
+    // anchor day-of-month: the walk below is day-against-day, and a column
+    // can start mid-month, so an occurrence snapped to the 1st can land in
+    // the wrong column — or fire twice in one column (the anchor day and
+    // the following 1st both inside it).
+    let dateShiftFunction: (date: string, by: number) => string;
     switch (period) {
       case 'day':
         dateShiftFunction = monthUtils.addDays;
@@ -756,27 +780,19 @@ export class CategoryTemplateContext {
         dateShiftFunction = monthUtils.addWeeks;
         break;
       case 'month':
-        dateShiftFunction = monthUtils.addMonths;
+        dateShiftFunction = monthUtils.addMonthsToDay;
         break;
       case 'year':
-        // the addYears function doesn't return the month number, so use addMonths
-        dateShiftFunction = (date: string | Date, numPeriods: number) =>
-          monthUtils.addMonths(date, numPeriods * 12);
+        dateShiftFunction = (date: string, numPeriods: number) =>
+          monthUtils.addMonthsToDay(date, numPeriods * 12);
         break;
       default:
         throw new Error(`Unrecognized periodic period: ${String(period)}`);
     }
 
-    // `addMonths` yields a 'yyyy-MM' month for the month and year cadences,
-    // which would not compare correctly against the 'yyyy-MM-dd' bounds
-    // below ('2024-01' sorts before '2024-01-01'). Normalize every step to a
-    // day so the whole walk stays day-against-day.
-    const shiftDate = (from: string | Date, by: number) =>
-      monthUtils.dayFromDate(dateShiftFunction(from, by));
-
     //shift the starting date until its in our month or in the future
     while (date < columnStart) {
-      date = shiftDate(date, numPeriods);
+      date = dateShiftFunction(date, numPeriods);
     }
 
     if (date > columnEnd) {
@@ -785,7 +801,7 @@ export class CategoryTemplateContext {
 
     while (date <= columnEnd) {
       toBudget += amount;
-      date = shiftDate(date, numPeriods);
+      date = dateShiftFunction(date, numPeriods);
     }
 
     return toBudget;
