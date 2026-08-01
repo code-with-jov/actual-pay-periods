@@ -41,7 +41,7 @@ The pay frequency decides how long a column is, and the payday date decides wher
 
 Columns always sit right next to each other with no gaps and no overlaps, so every day belongs to exactly one column.
 
-Each column is labeled with its date range and its position in the year, so the first period of the year appears as something like _Jan 5 - Jan 18 (PP1)_, the second as _Jan 19 - Feb 1 (PP2)_, and so on.
+Each column is labeled with its date range, so the first period of the year appears as something like _Jan 5 - Jan 18_ and the second as _Jan 19 - Feb 1_. The compact month picker above the desktop budget shortens each period to a letter and a number — _J1_ for the first period starting in January, _F1_ for the first starting in February — and a few places, like the column's menu, add the period's position in the year as _(PP1)_, _(PP2)_ and so on.
 
 ### How Periods Are Numbered
 
@@ -63,11 +63,11 @@ Amounts you budget while **Budget by pay period** is on are not visible when you
 
 Nothing is deleted when you switch. Each mode simply keeps its own set of budget columns, so whatever you budgeted in the other mode is waiting for you if you switch back. But you can't budget in one mode and read the results in the other, and switching back and forth means maintaining two budgets.
 
-Your transactions, account balances and category balances are shared between both modes — it is only the budgeted amounts that are separate.
+Your transactions and account balances are shared between both modes. Category balances are not: a category's balance is worked out per column from what you budgeted and spent there, and since the budgeted amounts are separate in each mode, the balances are too.
 
 ### Changing the Cadence Rebuilds Your Columns
 
-If you change the pay frequency or the payday date while pay periods are on, Actual rebuilds your budget columns to match the new schedule. The new columns cover different date ranges than the old ones, so amounts you budgeted against the old schedule won't line up with the new columns and you will need to go back through and budget again.
+If you change the pay frequency or the payday date while pay periods are on, Actual rebuilds your budget columns to match the new schedule. The stored amounts keep their period numbers, but those numbers now describe different date ranges — the amount you put into "the two weeks starting January 6" reappears in "the week starting January 1", and amounts in periods past the new schedule's count (a weekly year has more periods than a monthly one) stop being shown at all. Check your budget after a cadence change and expect to budget again.
 
 :::caution
 Settle on your pay frequency and payday date before you spend time budgeting. Changing them later means redoing that work.
@@ -78,8 +78,9 @@ Settle on your pay frequency and payday date before you spend time budgeting. Ch
 While you are budgeting by pay period, reports that read budgeted amounts can't be drawn. That means:
 
 - The [Budget Analysis](../experimental/budget-analysis-report.md) card has no data to show.
-- A [custom report](../reports/custom-reports.md) using the **Budgeted** balance type has no data to show.
+- A [custom report](../reports/custom-reports.md) using the **Budgeted** balance type has no data to show, on the full report page and on a saved dashboard card alike.
 - The Spending report's **Budgeted** comparison is unavailable; its **Single month** and **Average** comparisons work normally.
+- The Sankey report's **Budgeted** view falls back to **Spent** while pay periods are on.
 
 Reports built from your transactions — spending, net worth, cash flow, income vs expenses and the rest — are unaffected and keep working normally.
 
@@ -93,11 +94,13 @@ So a $1,200 rent payment due on the 1st is funded in full in the period containi
 
 Templates keep their calendar wording whatever your pay cycle is. A goal is written as "by August", "every 2 months" or "$50 a week", and the target month picker offers calendar months only — there's no way to aim a goal at a specific pay period.
 
-Actual converts those windows into pay periods for you, so the saving is spread across the periods you actually have:
+The one deliberate exception is a plain fixed amount. `#template 50` budgets $50 into **every** budget column, so with pay periods on it behaves as _$50 per paycheck_ — about $108 a month on a two-week cycle — not $50 a month. If you want the same monthly total after switching, divide your fixed templates by the number of paychecks in a month.
+
+Everything that describes a _window of time_ is converted into pay periods for you:
 
 - **Save by a month.** A goal due by August is funded across every period between now and the end of August, so each paycheck sets aside a smaller amount than a monthly budget would.
 - **Repeating amounts.** "$25 every week" budgets the occurrences that fall inside each period — usually one — rather than the whole month's worth in every period.
-- **Spending limits.** An `up to` limit is scaled to the period: a weekly limit counts the weeks inside that period, and a daily limit counts its days.
+- **Spending limits.** An `up to` limit is a cap on a stretch of time, so it is scaled to the column: a daily limit counts the column's days, a weekly limit counts its weeks, and a monthly limit is reduced to the column's share of a month — `up to 600` caps a two-week column at roughly $276, keeping the monthly total honest. Note the contrast with fixed amounts above: a cap is a monthly total, a fixed template is an amount per paycheck.
 
 ### Switching Modes Takes a Moment
 
@@ -112,7 +115,7 @@ Pay periods share the same identifier format as calendar months, `YYYY-MM`, but 
 While pay periods are on, this changes what the budget methods expect and return:
 
 - [`getBudgetMonths()`](../api/reference.md#getbudgetmonths) returns pay period identifiers such as `2026-13`, not calendar months such as `2026-01`.
-- [`getBudgetMonth()`](../api/reference.md#getbudgetmonth) and the other budget methods only accept those same pay period identifiers. Passing a calendar month raises an error, because no budget column exists for it.
+- [`getBudgetMonth()`](../api/reference.md#getbudgetmonth) and the other budget methods only accept those same pay period identifiers. Passing a calendar month raises an error, because no budget column exists for it. (The one exception is a running import, which skips this check.)
 
 The fix is the same in every case: have your script use the values that `getBudgetMonths()` gives back, rather than building month strings itself.
 
@@ -123,7 +126,7 @@ const latest = months[months.length - 1];
 const budget = await api.getBudgetMonth(latest);
 
 // Breaks when the budget uses pay periods
-const budget = await api.getBudgetMonth('2026-01');
+const badBudget = await api.getBudgetMonth('2026-01');
 ```
 
 If a script has to work with real dates, read the identifiers from `getBudgetMonths()` and pick the one you need, instead of formatting a date into `YYYY-MM` yourself.
