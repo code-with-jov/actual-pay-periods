@@ -28,6 +28,7 @@ import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
+import { getPayPeriodConfig } from '@actual-app/core/shared/pay-period-config';
 import {
   getPayPeriodLabel,
   isPayPeriod,
@@ -58,7 +59,10 @@ import { useLocale } from '#hooks/useLocale';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useNavigate } from '#hooks/useNavigate';
 import { useOverspentCategories } from '#hooks/useOverspentCategories';
-import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
+import {
+  payPeriodConfigKey,
+  usePayPeriodConfig,
+} from '#hooks/usePayPeriodConfig';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useSheetValue } from '#hooks/useSheetValue';
 import { useSpreadsheet } from '#hooks/useSpreadsheet';
@@ -97,10 +101,21 @@ export function BudgetPage() {
   // pay period ID persisted before pay periods were switched off) — fall
   // back to the current budget month instead of crashing on it.
   const startMonth = monthUtils.resolveStartMonth(startMonthPref, currMonth);
-  const [monthBounds, setMonthBounds] = useState({
+  // Switching pay periods on or off moves `startMonth` between calendar
+  // months and period IDs, but changing only the cadence can leave it
+  // untouched ('2017-13' is a valid period under every frequency) — the
+  // bounds and prewarmed cells still go stale, so depend on the config too.
+  const payPeriodConfig = usePayPeriodConfig();
+  const configKey = payPeriodConfigKey(payPeriodConfig);
+  // Tagged with the cadence these bounds describe; see the same pattern on
+  // desktop (components/budget/index.tsx). Mobile only string-compares the
+  // bounds so a stale pair doesn't throw, but it does enable or disable the
+  // previous/next arrows against the wrong end of the budget.
+  const [monthBounds, setMonthBounds] = useState(() => ({
     start: startMonth,
     end: startMonth,
-  });
+    configKey,
+  }));
   // const [editMode, setEditMode] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [_numberFormat] = useSyncedPref('numberFormat');
@@ -118,16 +133,35 @@ export function BudgetPage() {
 
   useEffect(() => {
     async function init() {
+      // Captured before the await; a cadence change while this request is
+      // in flight would otherwise mis-tag the bounds it returns. The
+      // registry (kept live by usePayPeriodConfigSync) is checked again on
+      // resolution so a response from before the change cannot overwrite
+      // the fresh bounds with a stale tag.
+      const requestedConfigKey = configKey;
       const { start, end } = await send('get-budget-bounds');
-      setMonthBounds({ start, end });
+      if (requestedConfigKey === payPeriodConfigKey(getPayPeriodConfig())) {
+        setMonthBounds({ start, end, configKey: requestedConfigKey });
+      }
 
       await prewarmMonth(budgetType, spreadsheet, startMonth);
 
       setInitialized(true);
     }
 
-    void init();
-  }, [budgetType, startMonth, dispatch, spreadsheet]);
+    void init().catch(error => {
+      console.error('Failed to initialize the mobile budget view', error);
+      // Show the single current column rather than an unrecoverable
+      // spinner; nothing else re-runs this effect.
+      const fallbackMonth = monthUtils.currentBudgetMonth();
+      setMonthBounds({
+        start: fallbackMonth,
+        end: fallbackMonth,
+        configKey: payPeriodConfigKey(getPayPeriodConfig()),
+      });
+      setInitialized(true);
+    });
+  }, [budgetType, startMonth, dispatch, spreadsheet, configKey]);
 
   const onBudgetAction = useCallback(
     async (month, type, args) => {
@@ -545,7 +579,9 @@ export function BudgetPage() {
     onToggleHiddenCategories,
   ]);
 
-  if (!categoryGroups || !initialized) {
+  // `monthBounds.configKey !== configKey` catches the render where the
+  // cadence has already flipped but the refetched bounds haven't landed.
+  if (!categoryGroups || !initialized || monthBounds.configKey !== configKey) {
     return (
       <View
         style={{

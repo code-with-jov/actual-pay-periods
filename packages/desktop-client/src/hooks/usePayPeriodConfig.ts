@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 
+import { listen } from '@actual-app/core/platform/client/connection';
 import {
   getPayPeriodConfig,
   setPayPeriodConfig,
@@ -7,7 +8,11 @@ import {
 import { validatePayPeriodConfig } from '@actual-app/core/shared/pay-periods';
 import type { PayPeriodConfig } from '@actual-app/core/shared/pay-periods';
 
+import { loadPrefs } from '#prefs/prefsSlice';
+import { useDispatch } from '#redux';
+
 import { useFeatureFlag } from './useFeatureFlag';
+import { useSpreadsheet } from './useSpreadsheet';
 import { useSyncedPref } from './useSyncedPref';
 
 /**
@@ -28,8 +33,13 @@ export function usePayPeriodConfig(): PayPeriodConfig | null {
   return validatePayPeriodConfig({ payFrequency, startDate });
 }
 
-function configKey(config: PayPeriodConfig | null): string | null {
-  return config ? `${config.payFrequency}|${config.startDate}` : null;
+/**
+ * A stable identity for a pay period configuration, suitable as an effect
+ * dependency: it changes whenever the budget cadence changes, including
+ * when pay periods are switched off entirely.
+ */
+export function payPeriodConfigKey(config: PayPeriodConfig | null): string {
+  return config ? `${config.payFrequency}|${config.startDate}` : 'calendar';
 }
 
 /**
@@ -39,13 +49,29 @@ function configKey(config: PayPeriodConfig | null): string | null {
  */
 export function usePayPeriodConfigSync(): void {
   const config = usePayPeriodConfig();
+  const dispatch = useDispatch();
+  const spreadsheet = useSpreadsheet();
 
   // Update during render (idempotent) so components rendering in the
   // same pass — before effects run — already resolve pay period IDs
   // against the fresh config.
-  if (configKey(config) !== configKey(getPayPeriodConfig())) {
+  if (payPeriodConfigKey(config) !== payPeriodConfigKey(getPayPeriodConfig())) {
     setPayPeriodConfig(config);
   }
+
+  useEffect(() => {
+    // Synced prefs sync under the `preferences` dataset, which the generic
+    // prefs reload in sync-events doesn't watch, so a configuration change
+    // this client didn't initiate (another device or tab, or an undo)
+    // would never reach redux. The server announces those explicitly.
+    return listen('pay-period-config-changed', () => {
+      // Order matters: the cached values belong to the previous cadence
+      // and sheet names collide across cadences, so they have to go
+      // before the prefs reload re-renders the budget against the new one.
+      spreadsheet.clearCache();
+      void dispatch(loadPrefs());
+    });
+  }, [dispatch, spreadsheet]);
 
   useEffect(() => {
     // Deactivate when the budget file is closed; the next file's prefs

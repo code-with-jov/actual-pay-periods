@@ -307,6 +307,12 @@ export function triggerBudgetChanges(oldValues, newValues) {
 }
 
 export async function doTransfer(categoryIds, transferId) {
+  // Only the active mode's budget columns are transferred: `createdMonths`
+  // holds calendar months or pay periods, never both, and only those have
+  // sheets to recompute. Money budgeted in the other mode's columns still
+  // makes the transfer prompt appear (see `isCategoryTransferRequired`), so
+  // it is never silently dropped, but moving it is left to the mode it
+  // belongs to.
   const { createdMonths: months } = sheet.get().meta();
 
   [...months].forEach(month => {

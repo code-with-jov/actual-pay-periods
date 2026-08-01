@@ -501,11 +501,10 @@ async function isCategoryTransferRequired({
   }
 
   // If there are any non-zero budget values, also force the user to
-  // transfer the category.
-  return [...(sheet.get().meta().createdMonths as Set<string>)].some(month => {
-    const sheetName = monthUtils.sheetForMonth(month);
-    const value = sheet.get().getCellValue(sheetName, 'budget-' + id);
-
-    return value != null && value !== 0;
-  });
+  // transfer the category. This looks at the budget table rather than the
+  // created months' sheets: those only cover the active mode's columns, so
+  // money budgeted in the other mode's columns (calendar months while pay
+  // periods are on, or vice versa) would otherwise never prompt and become
+  // unreachable once the category is deleted.
+  return actions.hasBudgetedAmount(id);
 }

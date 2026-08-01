@@ -1,6 +1,14 @@
+import {
+  resetPayPeriodConfigForTesting,
+  setPayPeriodConfig,
+} from '@actual-app/core/shared/pay-period-config';
 import type { CategoryEntity } from '@actual-app/core/types/models';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isBaseCategory } from './budget-analysis-spreadsheet';
+import {
+  createBudgetAnalysisSpreadsheet,
+  isBaseCategory,
+} from './budget-analysis-spreadsheet';
 
 const makeCategory = (
   overrides: Partial<CategoryEntity> & Pick<CategoryEntity, 'id' | 'name'>,
@@ -73,5 +81,31 @@ describe('createBudgetAnalysisSpreadsheet', () => {
       expect(result).toContain(visibleExpense);
       expect(result).toContain(hiddenExpense);
     });
+  });
+});
+
+describe('createBudgetAnalysisSpreadsheet while budgeting by pay period', () => {
+  afterEach(() => {
+    resetPayPeriodConfigForTesting();
+  });
+
+  it('leaves the data unset instead of charting empty calendar months', async () => {
+    setPayPeriodConfig({ payFrequency: 'biweekly', startDate: '2024-01-05' });
+
+    const setData = vi.fn();
+    const run = createBudgetAnalysisSpreadsheet({
+      startDate: '2024-01-01',
+      endDate: '2024-03-31',
+    });
+
+    // `send` and the spreadsheet are unmocked, so reaching either would
+    // fail: this asserts the report bails out before requesting a single
+    // calendar month's budget.
+    await run(
+      undefined as unknown as Parameters<typeof run>[0],
+      setData as unknown as Parameters<typeof run>[1],
+    );
+
+    expect(setData).not.toHaveBeenCalled();
   });
 });

@@ -1,66 +1,25 @@
+import { resetPayPeriodConfigForTesting } from '@actual-app/core/shared/pay-period-config';
 import type { Page } from '@playwright/test';
 
 import { expect, test } from './fixtures';
 import type { BudgetPage } from './page-models/budget-page';
 import { ConfigurationPage } from './page-models/configuration-page';
 import { Navigation } from './page-models/navigation';
-
-// Under Playwright the current date is pinned to 2017-01-01, so a biweekly
-// cadence anchored on 2017-01-01 makes every period deterministic:
-// '2017-13' = Jan 1 - Jan 14 is the current pay period.
-const PAY_PERIOD_START_DATE = '2017-01-01';
-const PAY_PERIOD_FREQUENCY_LABEL = 'Every 2 weeks';
-const CURRENT_PERIOD = '2017-13';
-const CURRENT_PERIOD_LABEL = 'Jan 1 - Jan 14';
-const NEXT_PERIOD = '2017-14';
-const NEXT_PERIOD_LABEL = 'Jan 15 - Jan 28';
-const PREVIOUS_PERIOD = '2016-38';
-const PREVIOUS_PERIOD_LABEL = 'Dec 18 - Dec 31';
-const CURRENT_CALENDAR_MONTH = '2017-01';
-
-function getPayPeriodCheckbox(page: Page) {
-  return page.getByRole('checkbox', { name: 'Budget by pay period' });
-}
-
-async function selectPayFrequency(page: Page, frequencyLabel: string) {
-  // The pay period section only mounts once the experimental flag has
-  // landed; wait for it rather than racing the settings re-render.
-  const frequencySelect = page.locator('#pay-period-frequency');
-  await frequencySelect.waitFor({ state: 'visible', timeout: 15000 });
-  await frequencySelect.click();
-  await page.getByRole('button', { name: frequencyLabel, exact: true }).click();
-}
-
-/**
- * Toggles the "Budget by pay period" checkbox into the desired state.
- *
- * Clicks on the settings checkboxes can race a re-render and get lost,
- * but a click that did land resolves slowly — the synced pref (and so
- * the checkbox) only updates once the server has rebuilt every budget
- * sheet for the new mode. So lost clicks are retried, with an inner wait
- * long enough to never double-click during a legitimate in-flight save.
- */
-async function togglePayPeriods(page: Page, enabled: boolean) {
-  const checkbox = getPayPeriodCheckbox(page);
-  await expect(checkbox).toBeEnabled();
-  await expect(async () => {
-    if ((await checkbox.isChecked()) !== enabled) {
-      await checkbox.click();
-    }
-    await expect(checkbox).toBeChecked({ checked: enabled, timeout: 20000 });
-  }).toPass({ timeout: 120000 });
-}
-
-/**
- * Configure a biweekly pay period cadence and turn on pay period
- * budgeting. Assumes the pay period settings section is already visible
- * (i.e. the 'Pay periods' feature flag is enabled).
- */
-async function configureAndEnablePayPeriods(page: Page) {
-  await selectPayFrequency(page, PAY_PERIOD_FREQUENCY_LABEL);
-  await page.locator('#pay-period-start-date').fill(PAY_PERIOD_START_DATE);
-  await togglePayPeriods(page, true);
-}
+import {
+  configureAndEnablePayPeriods,
+  CURRENT_CALENDAR_MONTH,
+  CURRENT_PERIOD,
+  CURRENT_PERIOD_LABEL,
+  getPayPeriodCheckbox,
+  NEXT_PERIOD,
+  NEXT_PERIOD_LABEL,
+  PAY_PERIOD_FREQUENCY_LABEL,
+  PAY_PERIOD_START_DATE,
+  PREVIOUS_PERIOD,
+  PREVIOUS_PERIOD_LABEL,
+  selectPayFrequency,
+  togglePayPeriods,
+} from './pay-period-helpers';
 
 test.describe('Pay period settings', () => {
   let page: Page;
@@ -81,6 +40,9 @@ test.describe('Pay period settings', () => {
   });
 
   test.afterEach(async () => {
+    // The shared helper activates the cadence in this process too; clear it
+    // so a later test can't inherit it.
+    resetPayPeriodConfigForTesting();
     await page?.close();
   });
 
@@ -111,11 +73,19 @@ test.describe('Pay period settings', () => {
     await selectPayFrequency(page, PAY_PERIOD_FREQUENCY_LABEL);
     await expect(checkbox).toBeDisabled();
 
-    await page.locator('#pay-period-start-date').fill(PAY_PERIOD_START_DATE);
+    // The date commits on blur/Enter, not per keystroke — a native date
+    // input emits "valid" partial values while the year is being typed.
+    const startDateInput = page.locator('#pay-period-start-date');
+    await startDateInput.fill(PAY_PERIOD_START_DATE);
+    await expect(checkbox).toBeDisabled();
+    await startDateInput.press('Enter');
     await expect(checkbox).toBeEnabled();
 
+    // The click is only acknowledged once the server has rebuilt the
+    // budget sheets for the new mode.
     await checkbox.click();
-    await expect(checkbox).toBeChecked();
+    await expect(checkbox).toBeChecked({ timeout: 60000 });
+    await expect(checkbox).toBeEnabled({ timeout: 60000 });
   });
 
   test('disabling pay periods returns the budget page to calendar months', async () => {
@@ -149,6 +119,103 @@ test.describe('Pay period settings', () => {
     await expect(
       budgetPage.budgetSummary.nth(1).getByText('January'),
     ).toBeVisible();
+  });
+
+  test('undoing the pay period toggle keeps the UI in sync with the server', async () => {
+    const settingsPage = await navigation.goToSettingsPage();
+    await settingsPage.enableExperimentalFeature('Pay periods');
+    await configureAndEnablePayPeriods(page);
+
+    const checkbox = getPayPeriodCheckbox(page);
+
+    // Undo reverts the preference server-side, which rebuilds the budget
+    // sheets back to calendar months. The client is told about it and must
+    // follow — otherwise the checkbox would keep claiming pay periods are
+    // on and the budget page would ask for sheets that no longer exist.
+    // The global Ctrl+Z handler ignores the shortcut while an input has
+    // focus, and the toggle click left the checkbox focused.
+    await page.evaluate(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+    });
+    await page.keyboard.press('Control+z');
+
+    await expect(checkbox).toBeChecked({ checked: false, timeout: 60000 });
+    await expect(checkbox).toBeEnabled({ timeout: 60000 });
+
+    const budgetPage = await navigation.goToBudgetPage();
+    await expect(budgetPage.selectedMonthButton).toHaveAttribute(
+      'data-month',
+      CURRENT_CALENDAR_MONTH,
+      { timeout: 60000 },
+    );
+
+    // No error boundary, either the route-level one or the app-level one.
+    await expect(
+      page.getByText('Something went wrong loading this section.'),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText('There was an unrecoverable error in the UI. Sorry!'),
+    ).toHaveCount(0);
+
+    // The table must show real calendar-month data rather than the zeroed
+    // out cells of a sheet the client is no longer aligned with.
+    await expect(budgetPage.budgetTable).toBeVisible();
+    await expect
+      .poll(() => budgetPage.getTotalSpent(), { timeout: 30000 })
+      .not.toEqual(0);
+  });
+
+  // The test above undoes from the *settings* page, so the budget page
+  // mounts fresh in the new mode. This one undoes while it is already on
+  // screen, exercising the re-initialization path: the config registry is
+  // updated during render, so for one render the requested months are in the
+  // new mode while the fetched bounds are still in the old one.
+  //
+  // Scope note — this is a smoke test, not a regression test for the mixed
+  // bounds throw. Reaching that needs the stale bounds to *start* in the
+  // same calendar year as the requested month, and under Playwright the
+  // clock is pinned to 2017-01-01 with a test file whose history reaches
+  // back into 2016, so the bounds always start in the prior year and the
+  // clamp never takes one end from each mode. The throw itself is covered by
+  // src/components/budget/MonthsContext.test.ts.
+  test('changing the cadence while the budget page is open does not break it', async () => {
+    const settingsPage = await navigation.goToSettingsPage();
+    await settingsPage.enableExperimentalFeature('Pay periods');
+    await configureAndEnablePayPeriods(page);
+
+    const budgetPage = await navigation.goToBudgetPage();
+    await expect(budgetPage.selectedMonthButton).toHaveAttribute(
+      'data-month',
+      CURRENT_PERIOD,
+      { timeout: 60000 },
+    );
+
+    // Undo the preference without leaving the page. The global handler
+    // ignores the shortcut while an input has focus.
+    await page.evaluate(() => {
+      (document.activeElement as HTMLElement | null)?.blur();
+    });
+    await page.keyboard.press('Control+z');
+
+    // The page has to survive the switch and settle into calendar months.
+    await expect(budgetPage.selectedMonthButton).toHaveAttribute(
+      'data-month',
+      CURRENT_CALENDAR_MONTH,
+      { timeout: 60000 },
+    );
+
+    await expect(
+      page.getByText('Something went wrong loading this section.'),
+    ).toHaveCount(0);
+    await expect(
+      page.getByText('There was an unrecoverable error in the UI. Sorry!'),
+    ).toHaveCount(0);
+
+    // Alive *and* showing data — a blank but un-crashed page must not pass.
+    await expect(budgetPage.budgetTable).toBeVisible();
+    await expect
+      .poll(() => budgetPage.getTotalSpent(), { timeout: 30000 })
+      .not.toEqual(0);
   });
 });
 
@@ -189,6 +256,9 @@ test.describe('Budget in pay period mode', () => {
   });
 
   test.afterEach(async () => {
+    // The shared helper activates the cadence in this process too; clear it
+    // so a later test can't inherit it.
+    resetPayPeriodConfigForTesting();
     await page?.close();
   });
 

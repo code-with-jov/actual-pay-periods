@@ -7,6 +7,7 @@ import {
 } from '@actual-app/core/shared/formulas/customFunctions';
 import type { FormulaQueryContext } from '@actual-app/core/shared/formulas/customFunctions';
 import * as monthUtils from '@actual-app/core/shared/months';
+import { payPeriodsActive } from '@actual-app/core/shared/pay-period-config';
 import { q } from '@actual-app/core/shared/query';
 import type { Query } from '@actual-app/core/shared/query';
 import { integerToAmount } from '@actual-app/core/shared/util';
@@ -571,6 +572,16 @@ async function fetchBudgetDimensionValueDirect(
   const dim = dimension.toLowerCase();
   if (!allowed.has(dim)) {
     throw new Error(`Invalid BUDGET_QUERY dimension: ${dimension}`);
+  }
+
+  // Budgeted amounts are stored against pay period columns while pay
+  // periods are active, so the calendar months below have nothing to read.
+  // Report that rather than summing a column of zeros into a total that
+  // looks real.
+  if (payPeriodsActive()) {
+    throw new Error(
+      'BUDGET_QUERY is not available while budgeting by pay period',
+    );
   }
 
   const intervals = monthUtils.rangeInclusive(startMonth, endMonth);

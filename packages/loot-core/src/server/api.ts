@@ -469,6 +469,11 @@ handlers['api/budget-set-amount'] = withMutation(async function ({
   amount,
 }) {
   checkFileOpen();
+  // The only budget write that used to skip this. Without it, a month that
+  // has no budget column — a calendar month while the file budgets by pay
+  // period, say — writes a row that nothing ever reads back, so the amount
+  // is silently discarded instead of reported.
+  await validateMonth(month);
   return handlers['budget/budget-amount']({
     month,
     category: categoryId,

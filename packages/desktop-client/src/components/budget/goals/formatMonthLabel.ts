@@ -19,5 +19,5 @@ export function formatMonthLabel(
     return payPeriodsActive() ? monthUtils.nameForMonth(month, locale) : month;
   }
   if (!monthUtils.isValidYearMonth(month)) return month;
-  return monthUtils.format(`${month}-01`, 'MMM yyyy', locale);
+  return monthUtils.format(month, 'MMM yyyy', locale);
 }

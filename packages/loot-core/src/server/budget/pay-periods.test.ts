@@ -10,7 +10,13 @@ import {
 import { generatePayPeriods, isPayPeriod } from '#shared/pay-periods';
 import type { PayPeriodConfig } from '#shared/pay-periods';
 
-import { copyPreviousMonth, getSheetValue, setBudget } from './actions';
+import {
+  copyPreviousMonth,
+  getCategoryAverage,
+  getSheetValue,
+  setBudget,
+} from './actions';
+import { app } from './app';
 import { createAllBudgets, createBudget, getBudgetRange } from './base';
 
 // In tests the current day is 2017-01-01 (see mocks/setup.ts). With this
@@ -25,6 +31,17 @@ const biweeklyConfig: PayPeriodConfig = {
 const periods2016 = generatePayPeriods(2016, biweeklyConfig);
 const lastPeriod2016 = periods2016[periods2016.length - 1];
 const periods2017 = generatePayPeriods(2017, biweeklyConfig);
+
+function periodById(monthId: string) {
+  const year = Number(monthId.slice(0, 4));
+  const period = generatePayPeriods(year, biweeklyConfig).find(
+    p => p.monthId === monthId,
+  );
+  if (!period) {
+    throw new Error(`No pay period '${monthId}' for this config`);
+  }
+  return period;
+}
 
 async function setupCategories() {
   await db.insertCategoryGroup({ id: 'group1', name: 'Expenses' });
@@ -225,5 +242,112 @@ describe('budget actions with pay periods', () => {
 
     const sheetP2 = monthUtils.sheetForMonth(periods2017[1].monthId);
     expect(await getSheetValue(sheetP2, `budget-${catId}`)).toBe(4200);
+  });
+});
+
+describe('getCategoryAverage with pay periods', () => {
+  it("averages period columns and ignores the other mode's budget rows", async () => {
+    await sheet.loadSpreadsheet(db);
+    const { catId } = await setupCategories();
+    await db.insertAccount({ id: 'account1', name: 'Account 1' });
+
+    // The current day (2017-01-01) falls in the last period of 2016, so
+    // averaging from that period looks back at the periods before it.
+    const current = lastPeriod2016.monthId;
+    const oneBack = monthUtils.subMonths(current, 1);
+    const twoBack = monthUtils.subMonths(current, 2);
+    const threeBack = monthUtils.subMonths(current, 3);
+
+    await db.insertTransaction({
+      date: periodById(oneBack).startDate,
+      amount: -3000,
+      account: 'account1',
+      category: catId,
+    });
+    await db.insertTransaction({
+      date: periodById(twoBack).startDate,
+      amount: -1000,
+      account: 'account1',
+      category: catId,
+    });
+
+    await createBudget([threeBack, twoBack, oneBack, current]);
+    await sheet.waitOnSpreadsheet();
+
+    // A calendar-month budget row left behind by a session with pay
+    // periods disabled. 201612 sorts below every period row of the same
+    // year, so an unrestricted MIN(month) reports it as the category's
+    // first activity month and the average then spans periods with no
+    // activity at all.
+    db.runQuery(
+      'INSERT INTO zero_budgets (id, month, category, amount) VALUES (?, ?, ?, ?)',
+      [`201612-${catId}`, 201612, catId, 50000],
+    );
+
+    // Activity starts two periods back, so only two columns are averaged
+    // no matter how far the window reaches.
+    expect(
+      await getCategoryAverage({
+        month: current,
+        maxMonths: 3,
+        categoryId: catId,
+      }),
+    ).toBe(-2000);
+    expect(
+      await getCategoryAverage({
+        month: current,
+        maxMonths: 12,
+        categoryId: catId,
+      }),
+    ).toBe(-2000);
+  });
+});
+
+describe('category transfer requirement with pay periods', () => {
+  const mustTransfer = app.handlers['must-category-transfer'];
+
+  it('is not required for a category with no budgeted money', async () => {
+    await sheet.loadSpreadsheet(db);
+    const { catId } = await setupCategories();
+
+    await createBudget([periods2017[0].monthId, periods2017[1].monthId]);
+    await sheet.waitOnSpreadsheet();
+
+    expect(await mustTransfer({ id: catId })).toBe(false);
+  });
+
+  it('is required for money budgeted in a period column', async () => {
+    await sheet.loadSpreadsheet(db);
+    const { catId } = await setupCategories();
+
+    await createBudget([periods2017[0].monthId, periods2017[1].monthId]);
+    await sheet.waitOnSpreadsheet();
+
+    await setBudget({
+      category: catId,
+      month: periods2017[0].monthId,
+      amount: 4200,
+    });
+    await sheet.waitOnSpreadsheet();
+
+    expect(await mustTransfer({ id: catId })).toBe(true);
+  });
+
+  it("is required for money budgeted only in the other mode's columns", async () => {
+    await sheet.loadSpreadsheet(db);
+    const { catId } = await setupCategories();
+
+    await createBudget([periods2017[0].monthId, periods2017[1].monthId]);
+    await sheet.waitOnSpreadsheet();
+
+    // Budgeted while pay periods were disabled: the calendar column has no
+    // sheet in this mode, so walking the created months' sheets never sees
+    // it and the money would vanish with the deleted category.
+    db.runQuery(
+      'INSERT INTO zero_budgets (id, month, category, amount) VALUES (?, ?, ?, ?)',
+      [`201701-${catId}`, 201701, catId, 12300],
+    );
+
+    expect(await mustTransfer({ id: catId })).toBe(true);
   });
 });
