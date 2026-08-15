@@ -23,7 +23,7 @@ on:
       project_name:
         description: 'Cloudflare Pages project name'
         type: string
-        default: actual-preview
+        default: actual-pay-periods
 
 permissions:
   contents: read
