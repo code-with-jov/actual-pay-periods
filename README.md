@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://develop.actual-pay-periods.pages.dev/budget">Live Demo</a>
+  <a href="https://develop.actual-pay-periods.pages.dev/budget">Live Pay Period Demo</a>
 </p>
 
 ## Getting Started
