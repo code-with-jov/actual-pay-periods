@@ -646,9 +646,12 @@ const compileFunction = saveStack('function', (state, func) => {
 
 const compileOp = saveStack('op', (state, fieldRef, opData) => {
   const { $transform, ...opExpr } = opData;
-  const [op] = Object.keys(opExpr);
-
-  const rhs = compileExpr(state, opData[op]);
+  const ops = Object.keys(opExpr);
+  if (ops.length === 0) {
+    throw new CompileError(
+      'No operator given to op: ' + JSON.stringify(opData),
+    );
+  }
 
   let lhs;
   if ($transform) {
@@ -659,6 +662,18 @@ const compileOp = saveStack('op', (state, fieldRef, opData) => {
   } else {
     lhs = compileExpr(state, '$' + fieldRef);
   }
+
+  // Multiple operators on one field (e.g. a `{$gte, $lte}` date range)
+  // are implicitly ANDed, same as the array form of field conditions.
+  const compiled = ops.map(op => compileSingleOp(state, lhs, op, opData[op]));
+  if (compiled.length === 1) {
+    return compiled[0];
+  }
+  return '(' + compiled.join(' AND ') + ')';
+});
+
+function compileSingleOp(state, lhs, op, rhsExpr) {
+  const rhs = compileExpr(state, rhsExpr);
 
   switch (op) {
     case '$gte': {
@@ -745,7 +760,7 @@ const compileOp = saveStack('op', (state, fieldRef, opData) => {
     default:
       throw new CompileError(`Unknown operator: ${op}`);
   }
-});
+}
 
 function compileConditions(state, conds) {
   if (!Array.isArray(conds)) {
