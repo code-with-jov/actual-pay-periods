@@ -69,4 +69,34 @@ export class SettingsPage {
       await expect(featureCheckbox).toBeChecked({ timeout: 2000 });
     }).toPass({ timeout: 15000 });
   }
+
+  async disableExperimentalFeature(featureName: string) {
+    await this.advancedSettingsButton.waitFor({
+      state: 'visible',
+      timeout: 2000,
+    });
+    await this.advancedSettingsButton.click();
+
+    await this.experimentalSettingsButton.waitFor({
+      state: 'visible',
+      timeout: 2000,
+    });
+    await this.experimentalSettingsButton.click();
+
+    const featureCheckbox = this.page.getByRole('checkbox', {
+      name: featureName,
+    });
+    await featureCheckbox.waitFor({ state: 'visible' });
+    // Mirror of enableExperimentalFeature: the click can race a settings
+    // re-render and get lost, so retry until the checkbox reflects it.
+    await expect(async () => {
+      if (await featureCheckbox.isChecked()) {
+        await featureCheckbox.click();
+      }
+      await expect(featureCheckbox).toBeChecked({
+        checked: false,
+        timeout: 2000,
+      });
+    }).toPass({ timeout: 15000 });
+  }
 }

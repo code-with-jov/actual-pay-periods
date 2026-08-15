@@ -8,7 +8,11 @@ import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
 import { getPayPeriodConfig } from '@actual-app/core/shared/pay-period-config';
-import { getPayPeriodDateFilter } from '@actual-app/core/shared/pay-periods';
+import {
+  getPayPeriodDateFilter,
+  isPayPeriod,
+} from '@actual-app/core/shared/pay-periods';
+import type { PayPeriodConfig } from '@actual-app/core/shared/pay-periods';
 import type {
   CategoryEntity,
   CategoryGroupEntity,
@@ -82,12 +86,24 @@ export function Budget() {
   // tag, closing the render gate below with nothing left to reopen it.
   // The registry is the live source of the active cadence, updated during
   // render by usePayPeriodConfigSync.
+  //
+  // Matching keys are still not enough: the server can flip cadence while
+  // the request is in flight (a change synced from another device, or an
+  // undo) and answer with the rebuilt bounds before this client hears
+  // about the change. In that window both keys agree on the old cadence
+  // but the values belong to the new one, and letting them through mixes
+  // month kinds in the table. The value check drops that response; the
+  // pending config-changed announcement re-runs init with a matching pair.
   const applyBoundsIfCurrent = (
-    requestedConfigKey: string,
+    requestedConfig: PayPeriodConfig | null,
     start: string,
     end: string,
   ) => {
+    const requestedConfigKey = payPeriodConfigKey(requestedConfig);
     if (requestedConfigKey !== payPeriodConfigKey(getPayPeriodConfig())) {
+      return;
+    }
+    if (isPayPeriod(start) !== (requestedConfig != null)) {
       return;
     }
     setBounds(prev =>
@@ -105,9 +121,9 @@ export function Budget() {
       // request is in flight, the bounds it returns describe the cadence
       // that was active when it was sent, not the one active when it
       // resolves.
-      const requestedConfigKey = payPeriodConfigKey(payPeriodConfig);
+      const requestedConfig = payPeriodConfig;
       const { start, end } = await send('get-budget-bounds');
-      applyBoundsIfCurrent(requestedConfigKey, start, end);
+      applyBoundsIfCurrent(requestedConfig, start, end);
 
       await prewarmAllMonths(
         budgetType,
@@ -148,10 +164,10 @@ export function Budget() {
   }, [configKey]);
 
   const loadBoundBudgets = useEffectEvent(() => {
-    const requestedConfigKey = payPeriodConfigKey(payPeriodConfig);
+    const requestedConfig = payPeriodConfig;
     void send('get-budget-bounds')
       .then(({ start, end }) => {
-        applyBoundsIfCurrent(requestedConfigKey, start, end);
+        applyBoundsIfCurrent(requestedConfig, start, end);
       })
       .catch(error => {
         // Refreshing the bounds is an optimization; the init() bounds are

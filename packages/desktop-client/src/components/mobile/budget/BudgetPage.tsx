@@ -140,10 +140,17 @@ export function BudgetPage() {
       // in flight would otherwise mis-tag the bounds it returns. The
       // registry (kept live by usePayPeriodConfigSync) is checked again on
       // resolution so a response from before the change cannot overwrite
-      // the fresh bounds with a stale tag.
+      // the fresh bounds with a stale tag. The value check covers the
+      // other half of that race: the server can flip cadence mid-request
+      // and answer with the rebuilt bounds before this client hears about
+      // it, leaving both keys on the old cadence while the values belong
+      // to the new one (see the same guard in components/budget/index.tsx).
       const requestedConfigKey = configKey;
       const { start, end } = await send('get-budget-bounds');
-      if (requestedConfigKey === payPeriodConfigKey(getPayPeriodConfig())) {
+      if (
+        requestedConfigKey === payPeriodConfigKey(getPayPeriodConfig()) &&
+        isPayPeriod(start) === (requestedConfigKey !== payPeriodConfigKey(null))
+      ) {
         setMonthBounds({ start, end, configKey: requestedConfigKey });
       }
 

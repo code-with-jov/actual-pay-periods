@@ -113,7 +113,7 @@ test.describe('Pay period settings', () => {
     ).toBeVisible();
   });
 
-  test('undoing the toggle while away from the budget page keeps the UI in sync', async () => {
+  test('deactivating pay periods away from the budget page keeps the UI in sync', async () => {
     const settingsPage = await navigation.goToSettingsPage();
     await settingsPage.enableExperimentalFeature('Pay periods');
     await configurePayPeriodPrefs(page);
@@ -123,18 +123,15 @@ test.describe('Pay period settings', () => {
     await togglePayPeriodsFromBudgetPage(page, true);
     activatePayPeriodConfigForTestProcess();
 
-    // Undo reverts the preference server-side, which rebuilds the budget
-    // sheets back to calendar months. The client is told about it and must
-    // follow — otherwise the budget page would ask for sheets that no
-    // longer exist. Undo from the settings route, so the change lands
-    // while the budget page is unmounted. The global Ctrl+Z handler
-    // ignores the shortcut while an input has focus, and the toggle click
-    // left the toggle button focused.
+    // Turn the experimental feature itself off from the settings route.
+    // That deactivates the configuration and rebuilds the budget sheets
+    // back to calendar months while the budget page is unmounted; the
+    // remount must follow the server — otherwise it would ask for sheets
+    // that no longer exist. The pay period section unmounting is the proof
+    // that the flag change landed client-side.
     await navigation.goToSettingsPage();
-    await page.evaluate(() => {
-      (document.activeElement as HTMLElement | null)?.blur();
-    });
-    await page.keyboard.press('Control+z');
+    await settingsPage.disableExperimentalFeature('Pay periods');
+    await expect(page.locator('#pay-period-frequency')).toHaveCount(0);
 
     budgetPage = await navigation.goToBudgetPage();
     await expect(budgetPage.selectedMonthButton).toHaveAttribute(
