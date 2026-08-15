@@ -452,7 +452,11 @@ const ChildTransactionEdit = forwardRef<
             <FieldLabel title={t('Payee')} />
             <TapField
               icon={<SvgUser width={17} height={17} />}
-              placeholder={t('Who did you pay?')}
+              placeholder={
+                transaction.amount > 0
+                  ? t('Who paid you?')
+                  : t('Who did you pay?')
+              }
               rightContent={dropdownChevron}
               isDisabled={
                 !!editingField &&
@@ -1165,7 +1169,11 @@ const TransactionEditInner = memo<TransactionEditInnerProps>(
             <FieldLabel title={t('Payee')} />
             <TapField
               icon={<SvgUser width={17} height={17} />}
-              placeholder={t('Who did you pay?')}
+              placeholder={
+                transaction.amount > 0
+                  ? t('Who paid you?')
+                  : t('Who did you pay?')
+              }
               textStyle={{
                 ...(transaction.is_parent && {
                   fontStyle: 'italic',

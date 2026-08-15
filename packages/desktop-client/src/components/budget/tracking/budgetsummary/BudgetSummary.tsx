@@ -71,6 +71,8 @@ export function BudgetSummary({ month }: BudgetSummaryProps) {
 
   return (
     <View
+      data-testid="budget-summary"
+      data-month={month}
       style={{
         backgroundColor:
           month === currentMonth
