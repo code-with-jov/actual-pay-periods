@@ -7,6 +7,14 @@ name: Personal - Pi image
 # cannot run on it at all - see the architecture gate in rocket-pi-3b's
 # reference/capacity.md. Building extra platforms would only burn QEMU minutes.
 #
+# Uses alpine.Dockerfile, not ubuntu.Dockerfile. Node.js stopped publishing
+# prebuilt armv7 binaries as of Node 24, so node:24-* has no linux/arm/v7
+# manifest and ubuntu.Dockerfile (FROM node:24-bookworm) can't build for this
+# platform anymore. alpine.Dockerfile sidesteps that by installing Node from
+# Alpine's own apk repo (`apk add nodejs`) instead of the upstream Node.js
+# binaries - this is the same split upstream's own docker-nightly.yml and
+# docker-release.yml use to keep publishing armv7/armv6 images.
+#
 # GHCR rather than Docker Hub: it authenticates with the built-in GITHUB_TOKEN,
 # so there are no registry secrets to create or rotate from an iPad.
 
@@ -92,7 +100,7 @@ jobs:
           context: .
           push: false
           load: true
-          file: packages/sync-server/docker/ubuntu.Dockerfile
+          file: packages/sync-server/docker/alpine.Dockerfile
           tags: actual-server-smoketest
 
       - name: Check that the image boots
@@ -107,14 +115,15 @@ jobs:
         run: docker logs smoketest || true
 
       # Reuses the layer cache from the smoke-test build where it can. The
-      # armv7 stage still compiles better-sqlite3 and bcrypt under QEMU, which
-      # is the slow part; type=gha caching keeps repeat builds tolerable.
+      # armv7 stage still compiles better-sqlite3 and bcrypt from source under
+      # QEMU (Alpine's node package has no prebuilt native modules), which is
+      # the slow part; type=gha caching keeps repeat builds tolerable.
       - name: Build and push armv7 image
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
           push: true
-          file: packages/sync-server/docker/ubuntu.Dockerfile
+          file: packages/sync-server/docker/alpine.Dockerfile
           platforms: linux/arm/v7
           tags: |
             ${{ env.IMAGE }}:pi
