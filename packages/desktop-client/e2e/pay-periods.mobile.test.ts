@@ -7,12 +7,33 @@ import { ConfigurationPage } from './page-models/configuration-page';
 import type { MobileBudgetPage } from './page-models/mobile-budget-page';
 import { MobileNavigation } from './page-models/mobile-navigation';
 import {
-  configureAndEnablePayPeriods,
+  activatePayPeriodConfigForTestProcess,
+  configurePayPeriodPrefs,
+  CURRENT_CALENDAR_MONTH,
   CURRENT_PERIOD,
   CURRENT_PERIOD_LABEL,
   PREVIOUS_PERIOD,
   PREVIOUS_PERIOD_LABEL,
 } from './pay-period-helpers';
+
+/**
+ * Enable pay periods from the budget page menu — the mobile counterpart of
+ * the desktop month picker toggle. Selecting the item closes the menu, and
+ * the server rebuilds every budget sheet before the heading settles on the
+ * current period.
+ */
+async function enablePayPeriodsFromMenu(
+  page: Page,
+  budgetPage: MobileBudgetPage,
+) {
+  await budgetPage.openBudgetPageMenu();
+  await page.getByText('Enable pay period budgeting', { exact: true }).click();
+  await expect(budgetPage.heading.locator('[data-month]')).toHaveAttribute(
+    'data-month',
+    CURRENT_PERIOD,
+    { timeout: 60000 },
+  );
+}
 
 test.describe('Mobile Budget in pay period mode', () => {
   let page: Page;
@@ -50,21 +71,31 @@ test.describe('Mobile Budget in pay period mode', () => {
 
     const settingsPage = await navigation.goToSettingsPage();
     await settingsPage.enableExperimentalFeature('Pay periods');
-    await configureAndEnablePayPeriods(page);
+    await configurePayPeriodPrefs(page);
 
     budgetPage = await navigation.goToBudgetPage();
-    // Enabling pay periods rebuilds the budget cache for every period
-    // sheet, so give the mode switch extra time to settle under CI load.
-    await expect(budgetPage.heading.locator('[data-month]')).toHaveAttribute(
-      'data-month',
-      CURRENT_PERIOD,
-      { timeout: 30000 },
-    );
+    await enablePayPeriodsFromMenu(page, budgetPage);
+    activatePayPeriodConfigForTestProcess();
   });
 
   test.afterEach(async () => {
     resetPayPeriodConfigForTesting();
     await page.close();
+  });
+
+  test('disabling pay periods from the menu returns to calendar months', async () => {
+    await budgetPage.openBudgetPageMenu();
+    await page
+      .getByText('Disable pay period budgeting', { exact: true })
+      .click();
+
+    // Disabling rebuilds the sheets back to calendar months; the stale pay
+    // period start month must resolve to the current calendar month.
+    await expect(budgetPage.heading.locator('[data-month]')).toHaveAttribute(
+      'data-month',
+      CURRENT_CALENDAR_MONTH,
+      { timeout: 60000 },
+    );
   });
 
   test('budget page heading shows the current pay period date range', async () => {
@@ -245,14 +276,11 @@ test.describe('Mobile Tracking budget in pay period mode', () => {
     const settingsPage = await navigation.goToSettingsPage();
     await settingsPage.useBudgetType('Tracking');
     await settingsPage.enableExperimentalFeature('Pay periods');
-    await configureAndEnablePayPeriods(page);
+    await configurePayPeriodPrefs(page);
 
     budgetPage = await navigation.goToBudgetPage();
-    await expect(budgetPage.heading.locator('[data-month]')).toHaveAttribute(
-      'data-month',
-      CURRENT_PERIOD,
-      { timeout: 30000 },
-    );
+    await enablePayPeriodsFromMenu(page, budgetPage);
+    activatePayPeriodConfigForTestProcess();
   });
 
   test.afterEach(async () => {

@@ -19,8 +19,12 @@ export const PREVIOUS_PERIOD = '2016-38';
 export const PREVIOUS_PERIOD_LABEL = 'Dec 18 - Dec 31';
 export const CURRENT_CALENDAR_MONTH = '2017-01';
 
-export function getPayPeriodCheckbox(page: Page) {
-  return page.getByRole('checkbox', { name: 'Budget by pay period' });
+/**
+ * The toggle button in the budget page's month picker (desktop only —
+ * mobile toggles through the budget page menu instead).
+ */
+export function getPayPeriodToggle(page: Page) {
+  return page.getByRole('button', { name: 'Toggle pay period budgeting' });
 }
 
 export async function selectPayFrequency(page: Page, frequencyLabel: string) {
@@ -33,48 +37,53 @@ export async function selectPayFrequency(page: Page, frequencyLabel: string) {
 }
 
 /**
- * Toggles the "Budget by pay period" checkbox into the desired state.
- *
- * The control is disabled for as long as the save is in flight — the server
- * cold-builds every budget column for the new mode before the pref save
- * resolves — so one click is enough; just wait for it to come back.
+ * Fill in the biweekly cadence on the settings page without enabling it —
+ * enabling now happens from the budget page. Assumes the pay period
+ * settings section is already visible (i.e. the 'Pay periods' feature flag
+ * is enabled).
  */
-export async function togglePayPeriods(page: Page, enabled: boolean) {
-  const checkbox = getPayPeriodCheckbox(page);
-  await expect(checkbox).toBeEnabled();
-
-  if ((await checkbox.isChecked()) === enabled) {
-    return;
-  }
-
-  await checkbox.click();
-  await expect(checkbox).toBeChecked({ checked: enabled, timeout: 60000 });
-  await expect(checkbox).toBeEnabled({ timeout: 60000 });
-}
-
-/**
- * Configure a biweekly pay period cadence and turn on pay period budgeting.
- * Assumes the pay period settings section is already visible (i.e. the 'Pay
- * periods' feature flag is enabled).
- *
- * Also activates the same cadence in the *test* process, so that helpers
- * which call `monthUtils` here — rather than driving the UI — resolve period
- * IDs instead of throwing `no pay period configuration is active`. Both come
- * from the constants above, so the test's view of the cadence cannot drift
- * from what the app was configured with. Pair with
- * `resetPayPeriodConfigForTesting()` in an afterEach.
- */
-export async function configureAndEnablePayPeriods(page: Page) {
+export async function configurePayPeriodPrefs(page: Page) {
   await selectPayFrequency(page, PAY_PERIOD_FREQUENCY_LABEL);
   const startDateInput = page.locator('#pay-period-start-date');
   await startDateInput.fill(PAY_PERIOD_START_DATE);
   // The date field commits on blur/Enter rather than per keystroke, so the
   // fill alone doesn't save the pref.
   await startDateInput.press('Enter');
-  await togglePayPeriods(page, true);
+}
 
+/**
+ * Activate the same cadence in the *test* process, so that helpers which
+ * call `monthUtils` here — rather than driving the UI — resolve period IDs
+ * instead of throwing `no pay period configuration is active`. The values
+ * come from the constants above, so the test's view of the cadence cannot
+ * drift from what the app was configured with. Pair with
+ * `resetPayPeriodConfigForTesting()` in an afterEach.
+ */
+export function activatePayPeriodConfigForTestProcess() {
   setPayPeriodConfig({
     payFrequency: 'biweekly',
     startDate: PAY_PERIOD_START_DATE,
   });
+}
+
+/**
+ * Toggle pay periods from the desktop budget page's month picker and wait
+ * for the budget to settle in the target cadence. The server cold-builds
+ * every budget column for the new mode before the pref save resolves, and
+ * the page re-initializes behind a spinner after that, so the settled
+ * month picker is the signal that the switch is complete.
+ */
+export async function togglePayPeriodsFromBudgetPage(
+  page: Page,
+  enabled: boolean,
+) {
+  const toggle = getPayPeriodToggle(page);
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+
+  await expect(page.getByTestId('selected-budget-month')).toHaveAttribute(
+    'data-month',
+    enabled ? CURRENT_PERIOD : CURRENT_CALENDAR_MONTH,
+    { timeout: 60000 },
+  );
 }
