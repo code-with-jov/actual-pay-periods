@@ -67,6 +67,7 @@ import { SheetNameProvider } from '#hooks/useSheetName';
 import { useSheetValue } from '#hooks/useSheetValue';
 import { useSpreadsheet } from '#hooks/useSpreadsheet';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useTogglePayPeriods } from '#hooks/useTogglePayPeriods';
 import { useTransactions } from '#hooks/useTransactions';
 import { useUndo } from '#hooks/useUndo';
 import { collapseModals, pushModal } from '#modals/modalsSlice';
@@ -93,6 +94,8 @@ export function BudgetPage() {
   const budgetType = isBudgetType(budgetTypePref) ? budgetTypePref : 'envelope';
   const goalTemplatesEnabled = useFeatureFlag('goalTemplatesEnabled');
   const goalTemplatesUIEnabled = useFeatureFlag('goalTemplatesUIEnabled');
+  const isPayPeriodsEnabled = useFeatureFlag('payPeriodsEnabled');
+  const { payPeriodsActive, togglePayPeriods } = useTogglePayPeriods();
   const spreadsheet = useSpreadsheet();
 
   const currMonth = monthUtils.currentBudgetMonth();
@@ -137,10 +140,17 @@ export function BudgetPage() {
       // in flight would otherwise mis-tag the bounds it returns. The
       // registry (kept live by usePayPeriodConfigSync) is checked again on
       // resolution so a response from before the change cannot overwrite
-      // the fresh bounds with a stale tag.
+      // the fresh bounds with a stale tag. The value check covers the
+      // other half of that race: the server can flip cadence mid-request
+      // and answer with the rebuilt bounds before this client hears about
+      // it, leaving both keys on the old cadence while the values belong
+      // to the new one (see the same guard in components/budget/index.tsx).
       const requestedConfigKey = configKey;
       const { start, end } = await send('get-budget-bounds');
-      if (requestedConfigKey === payPeriodConfigKey(getPayPeriodConfig())) {
+      if (
+        requestedConfigKey === payPeriodConfigKey(getPayPeriodConfig()) &&
+        isPayPeriod(start) === (requestedConfigKey !== payPeriodConfigKey(null))
+      ) {
         setMonthBounds({ start, end, configKey: requestedConfigKey });
       }
 
@@ -559,6 +569,13 @@ export function BudgetPage() {
     [budgetType, dispatch, onBudgetAction, onOpenBudgetMonthNotesModal],
   );
 
+  const onTogglePayPeriods = useCallback(() => {
+    // Close the menu first so the rebuild happens behind the budget page,
+    // not behind a stale modal.
+    dispatch(collapseModals({ rootModalName: 'budget-page-menu' }));
+    togglePayPeriods();
+  }, [dispatch, togglePayPeriods]);
+
   const onOpenBudgetPageMenu = useCallback(() => {
     dispatch(
       pushModal({
@@ -568,15 +585,24 @@ export function BudgetPage() {
             onAddCategoryGroup: onOpenNewCategoryGroupModal,
             onToggleHiddenCategories,
             onSwitchBudgetFile,
+            onTogglePayPeriods: isPayPeriodsEnabled
+              ? onTogglePayPeriods
+              : undefined,
+            payPeriodsActive: isPayPeriodsEnabled
+              ? payPeriodsActive
+              : undefined,
           },
         },
       }),
     );
   }, [
     dispatch,
+    isPayPeriodsEnabled,
     onOpenNewCategoryGroupModal,
     onSwitchBudgetFile,
     onToggleHiddenCategories,
+    onTogglePayPeriods,
+    payPeriodsActive,
   ]);
 
   // `monthBounds.configKey !== configKey` catches the render where the

@@ -11,7 +11,7 @@ import { validatePayPeriodConfig } from '@actual-app/core/shared/pay-periods';
 import type { PayFrequency } from '@actual-app/core/shared/pay-periods';
 import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 
-import { Checkbox, FormField, FormLabel } from '#components/forms';
+import { FormField, FormLabel } from '#components/forms';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 import { saveSyncedPrefs } from '#prefs/prefsSlice';
 import { useDispatch } from '#redux';
@@ -58,13 +58,6 @@ export function PayPeriodSettings() {
       setIsSaving(false);
     }
   }
-
-  const onToggle = () => {
-    // Saving the pref is enough: the server rebuilds the budget sheets
-    // whenever the active pay period configuration changes (see
-    // loot-core server/budget/pay-period-config.ts).
-    void savePref({ showPayPeriods: isEnabled ? 'false' : 'true' });
-  };
 
   const commitStartDate = () => {
     if (pendingStartDate == null) {
@@ -119,44 +112,24 @@ export function PayPeriodSettings() {
             </FormField>
           </View>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Text style={{ display: 'flex' }}>
-              <Checkbox
-                id="settings-showPayPeriods"
-                checked={isEnabled}
-                disabled={isSaving || (!isEnabled && !validConfig)}
-                onChange={onToggle}
-              />
-              <label htmlFor="settings-showPayPeriods">
-                <Trans>Budget by pay period</Trans>
-              </label>
-            </Text>
-            {isSaving && (
-              <View
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
-                aria-live="polite"
-              >
-                <AnimatedLoading width={14} height={14} />
-                <Text style={{ color: theme.pageTextSubdued }}>
-                  <Trans>Rebuilding your budget…</Trans>
-                </Text>
-              </View>
-            )}
-          </View>
+          {isSaving && (
+            <View
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+              aria-live="polite"
+            >
+              <AnimatedLoading width={14} height={14} />
+              <Text style={{ color: theme.pageTextSubdued }}>
+                <Trans>Rebuilding your budget…</Trans>
+              </Text>
+            </View>
+          )}
 
-          {!validConfig && (
+          {!validConfig && isEnabled && (
             <Text style={{ color: theme.warningText }}>
-              {isEnabled ? (
-                <Trans>
-                  Pay periods stay off until the pay frequency and payday date
-                  are valid.
-                </Trans>
-              ) : (
-                <Trans>
-                  Choose a pay frequency and a payday date to enable pay
-                  periods.
-                </Trans>
-              )}
+              <Trans>
+                Pay periods stay off until the pay frequency and payday date are
+                valid.
+              </Trans>
             </Text>
           )}
         </View>
@@ -167,7 +140,8 @@ export function PayPeriodSettings() {
           <strong>Pay periods</strong> let you budget by your actual pay
           schedule — weekly, every two weeks, or monthly — instead of by
           calendar month. Pick how often you are paid and the date of any one of
-          your paydays; your budget columns will then follow that cadence.
+          your paydays, then switch pay period budgeting on or off from the
+          budget page; your budget columns will then follow that cadence.
         </Trans>
       </Text>
     </Setting>
