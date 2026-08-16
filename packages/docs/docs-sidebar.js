@@ -111,7 +111,6 @@ const sidebars = {
           },
           items: [
             'budgeting/categories',
-            'budgeting/pay-periods',
             'budgeting/returns-and-reimbursements',
             {
               type: 'category',
@@ -218,6 +217,7 @@ const sidebars = {
             'experimental/monthly-cleanup',
             'experimental/rule-templating',
             'experimental/formulas',
+            'experimental/pay-periods',
             'experimental/balance-forecast-report',
             'experimental/budget-analysis-report',
             'experimental/monte-carlo-analysis',
