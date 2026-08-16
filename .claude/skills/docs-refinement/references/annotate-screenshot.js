@@ -46,9 +46,7 @@ module.exports = async page => {
     throw new Error('STEPS must be a non-empty JSON array');
   }
 
-  const colorsUsed = new Set(
-    steps.map(s => (s.color || 'blue').toLowerCase()),
-  );
+  const colorsUsed = new Set(steps.map(s => (s.color || 'blue').toLowerCase()));
   if (colorsUsed.has('red') && colorsUsed.has('green')) {
     throw new Error(
       'Refusing to mix red and green annotations in one screenshot — the style ' +
@@ -60,21 +58,26 @@ module.exports = async page => {
   const results = await page.evaluate(
     ({ steps, palette }) => {
       const out = [];
-      steps.forEach((step, i) => {
+      steps.forEach(step => {
         const el = document.querySelector(step.selector);
         if (!el) {
           out.push({ ok: false, selector: step.selector, reason: 'not-found' });
           return;
         }
 
-        el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+        el.scrollIntoView({
+          block: 'center',
+          inline: 'center',
+          behavior: 'instant',
+        });
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) {
           out.push({ ok: false, selector: step.selector, reason: 'zero-size' });
           return;
         }
 
-        const color = palette[(step.color || 'blue').toLowerCase()] || palette.blue;
+        const color =
+          palette[(step.color || 'blue').toLowerCase()] || palette.blue;
         const PAD = 6;
 
         const box = document.createElement('div');
