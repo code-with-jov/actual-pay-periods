@@ -26,11 +26,21 @@ Pay periods are an experimental feature, so there are two steps: switch on the f
 4. Go back to the main **Settings** page. There is now a **Pay periods** section.
 5. Choose your **Pay frequency**: **Weekly**, **Every 2 weeks** or **Monthly**.
 6. In **Date of a payday**, enter the date of any one of your paydays. It does not have to be the first one, or a recent one — one real payday is enough.
-7. Tick **Budget by pay period**.
+7. Go to the **Budget** page and click the pay period icon next to the month picker to turn on **Budget by pay period**.
 
-The **Budget by pay period** checkbox stays disabled until both the pay frequency and the payday date are filled in, because Actual can't work out where your periods start without them. A message under the checkbox tells you when something is still missing.
+![The Pay periods checkbox ticked in Experimental features](/img/experimental/pay-periods/pay-periods-enable-experimental.png)
 
-Once the box is ticked, Actual rebuilds your budget columns and the budget page starts showing pay periods instead of months. To go back to calendar months, untick **Budget by pay period**.
+![The Pay periods section on the Settings page, with a frequency and payday filled in](/img/experimental/pay-periods/pay-periods-settings.png)
+
+![The pay period toggle in the budget page's month picker](/img/experimental/pay-periods/pay-periods-budget-toggle.png)
+
+If you haven't finished steps 5 and 6 yet, the toggle still works — Actual fills in a monthly cadence starting today instead of blocking you, and you can refine the pay frequency and payday date on the Settings page afterward.
+
+Once it's on, Actual rebuilds your budget columns and the budget page starts showing pay periods instead of months, with the compact month picker now showing period labels like **J1** and **F1**.
+
+![The budget page after turning pay periods on, showing period columns and the compact period labels](/img/experimental/pay-periods/pay-periods-budget-columns.png)
+
+Click the same icon again to go back to calendar months.
 
 ## How Your Choices Shape the Columns
 
@@ -104,7 +114,7 @@ Everything that describes a _window of time_ is converted into pay periods for y
 
 ### Switching Modes Takes a Moment
 
-Ticking or unticking **Budget by pay period** rebuilds every budget column, which can take a few seconds on a large budget. Actual shows a **Rebuilding your budget…** message while it works, and the settings controls are unavailable until it finishes. Let it complete rather than reloading the page.
+Turning **Budget by pay period** on or off from the budget page rebuilds every budget column, which can take a few seconds on a large budget. The toggle is disabled until the rebuild finishes — let it complete rather than reloading the page. Changing the pay frequency or payday date on the Settings page rebuilds your columns the same way, and shows a **Rebuilding your budget…** message while it works.
 
 ## Pay Periods and the API
 
