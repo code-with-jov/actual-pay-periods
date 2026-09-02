@@ -43,6 +43,7 @@ import { LoadingIndicator } from '#components/reports/LoadingIndicator';
 import { ReportLegend } from '#components/reports/ReportLegend';
 import {
   defaultReport,
+  getIntervalFormat,
   ReportOptions,
 } from '#components/reports/ReportOptions';
 import type { dateRangeProps } from '#components/reports/ReportOptions';
@@ -57,6 +58,7 @@ import { useReport } from '#components/reports/useReport';
 import { calculateHasWarning, fromDateRepr } from '#components/reports/util';
 import { useAccounts } from '#hooks/useAccounts';
 import { useCategories } from '#hooks/useCategories';
+import { useDateFormat } from '#hooks/useDateFormat';
 import { useFormat } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
 import { useLocalPref } from '#hooks/useLocalPref';
@@ -147,6 +149,7 @@ function CustomReportInner({
   const locale = useLocale();
   const { t } = useTranslation();
   const format = useFormat();
+  const dateFormat = useDateFormat() || 'MM/dd/yyyy';
 
   const { data: categories = { grouped: [], list: [] } } = useCategories();
   const { isNarrowWidth } = useResponsive();
@@ -388,7 +391,7 @@ function CustomReportInner({
           name: inter,
           pretty: monthUtils.format(
             inter,
-            ReportOptions.intervalFormat.get(interval) || '',
+            getIntervalFormat(interval, dateFormat),
             locale,
           ),
         }))
@@ -457,6 +460,10 @@ function CustomReportInner({
     report.conditionsOp,
     includeCurrentInterval,
     savedStatus,
+    // onSetAllIntervals formats the interval labels with the date preference,
+    // and being an effect event it reads it without re-triggering -- so the
+    // labels would stay stale until another dependency happened to change.
+    dateFormat,
   ]);
 
   useEffect(() => {
@@ -569,6 +576,7 @@ function CustomReportInner({
       accounts,
       graphType,
       firstDayOfWeekIdx,
+      dateFormat,
     });
   }, [
     startDate,
@@ -590,6 +598,7 @@ function CustomReportInner({
     sortByOp,
     graphType,
     firstDayOfWeekIdx,
+    dateFormat,
   ]);
   const graphData = useReport('default', getGraphData);
   const groupedData = useReport('grouped', getGroupData);

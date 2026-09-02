@@ -24,6 +24,7 @@ import { ReportOptions } from '#components/reports/ReportOptions';
 import { createCustomSpreadsheet } from '#components/reports/spreadsheets/custom-spreadsheet';
 import { createGroupedSpreadsheet } from '#components/reports/spreadsheets/grouped-spreadsheet';
 import { useReport } from '#components/reports/useReport';
+import { useDateFormat } from '#hooks/useDateFormat';
 import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 
@@ -87,6 +88,7 @@ export function GetCardData({
 }) {
   const { isNarrowWidth } = useResponsive();
   const [budgetType = 'envelope'] = useSyncedPref('budgetType');
+  const dateFormat = useDateFormat() || 'MM/dd/yyyy';
   const payPeriodConfig = usePayPeriodConfig();
 
   let startDate = report.startDate;
@@ -164,6 +166,7 @@ export function GetCardData({
       graphType: report.graphType,
       firstDayOfWeekIdx,
       sortByOp: report.sortBy,
+      dateFormat,
     });
   }, [
     report,
@@ -174,6 +177,9 @@ export function GetCardData({
     endDate,
     firstDayOfWeekIdx,
     budgetType,
+    // Load-bearing: without this the card keeps its old interval labels after
+    // the date format preference changes, until something else invalidates it.
+    dateFormat,
   ]);
   const graphData = useReport('default' + report.name, getGraphData);
   const groupedData = useReport('grouped' + report.name, getGroupData);
