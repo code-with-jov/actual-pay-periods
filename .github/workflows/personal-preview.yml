@@ -1,0 +1,82 @@
+name: Personal - Preview
+
+# Optional, on-demand preview deploy. Never runs automatically.
+#
+# Why Cloudflare Pages and not GitHub Pages: packages/desktop-client/public/_headers
+# sets Cross-Origin-Opener-Policy and Cross-Origin-Embedder-Policy, which Actual
+# needs for SharedArrayBuffer. GitHub Pages cannot send custom headers, so a
+# Pages deploy boots straight into the "Actual requires SharedArrayBuffer" fatal
+# error (see FatalError.tsx). Cloudflare Pages reads that same _headers file
+# natively, so no application change is needed.
+#
+# Inert until you set the CLOUDFLARE_ENABLED repository variable to 'true' and
+# add the CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID secrets. Day to day,
+# Playwright traces from personal-e2e.yml are the primary debugging surface.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag or SHA to preview'
+        type: string
+        default: develop
+      project_name:
+        description: 'Cloudflare Pages project name'
+        type: string
+        default: actual-pay-periods
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    name: Deploy preview
+    if: vars.CLOUDFLARE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          download-translations: 'false'
+
+      - name: Build browser bundle
+        # Matches the e2e build so the preview behaves like what CI exercised.
+        env:
+          REACT_APP_NETLIFY: 'true'
+        run: yarn build:browser --skip-translations
+
+      # Cheap guard against a silent regression: if Vite ever stops copying
+      # public/_headers into the build, the deploy still succeeds but the app
+      # dies on SharedArrayBuffer. Better to fail here with a clear reason.
+      - name: Verify COOP/COEP headers are in the build output
+        run: |
+          HEADERS=packages/desktop-client/build/_headers
+          if [ ! -f "$HEADERS" ]; then
+            echo "::error::_headers is missing from the build output; the preview would fail on SharedArrayBuffer."
+            exit 1
+          fi
+          grep -q 'Cross-Origin-Embedder-Policy' "$HEADERS" || {
+            echo "::error::_headers is present but has no COEP directive."
+            exit 1
+          }
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT_NAME: ${{ inputs.project_name }}
+          DEPLOY_REF: ${{ inputs.ref }}
+        run: |
+          npx --yes wrangler@4 pages deploy packages/desktop-client/build \
+            --project-name="$PROJECT_NAME" \
+            --branch="$DEPLOY_REF" \
+            --commit-dirty=true

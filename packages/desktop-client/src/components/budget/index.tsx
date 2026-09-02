@@ -2,10 +2,17 @@
 import React, { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import type { ComponentType } from 'react';
 
+import { AnimatedLoading } from '@actual-app/components/icons/AnimatedLoading';
 import { styles } from '@actual-app/components/styles';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
+import { getPayPeriodConfig } from '@actual-app/core/shared/pay-period-config';
+import {
+  getPayPeriodDateFilter,
+  isPayPeriod,
+} from '@actual-app/core/shared/pay-periods';
+import type { PayPeriodConfig } from '@actual-app/core/shared/pay-periods';
 import type {
   CategoryEntity,
   CategoryGroupEntity,
@@ -25,6 +32,10 @@ import { useCategories } from '#hooks/useCategories';
 import { useGlobalPref } from '#hooks/useGlobalPref';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useNavigate } from '#hooks/useNavigate';
+import {
+  payPeriodConfigKey,
+  usePayPeriodConfig,
+} from '#hooks/usePayPeriodConfig';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useSpreadsheet } from '#hooks/useSpreadsheet';
 import { useSyncedPref } from '#hooks/useSyncedPref';
@@ -37,18 +48,31 @@ import { TrackingBudgetProvider } from './tracking/TrackingBudgetContext';
 import { prewarmAllMonths, prewarmMonth } from './util';
 
 export function Budget() {
-  const currentMonth = monthUtils.currentMonth();
+  const payPeriodConfig = usePayPeriodConfig();
+  const currentMonth = monthUtils.currentBudgetMonth();
   const spreadsheet = useSpreadsheet();
   const navigate = useNavigate();
   const [summaryCollapsed, setSummaryCollapsedPref] = useLocalPref(
     'budget.summaryCollapsed',
   );
   const [startMonthPref, setStartMonthPref] = useLocalPref('budget.startMonth');
-  const startMonth = startMonthPref || currentMonth;
-  const [bounds, setBounds] = useState({
+  // A stored start month from the other mode (e.g. a calendar month while
+  // pay periods are active, or vice versa) must not leak into month math —
+  // mixing the two kinds produces broken ranges.
+  const startMonth = monthUtils.resolveStartMonth(startMonthPref, currentMonth);
+  // `bounds` is tagged with the cadence it was fetched for. The registry
+  // that resolves pay period IDs is updated *during* render (see
+  // usePayPeriodConfigSync), so on the render where the cadence flips,
+  // `startMonth` is already expressed in the new mode while this state
+  // still holds the old mode's bounds. Rendering the table with that pair
+  // throws (`rangeInclusive` refuses to mix a calendar month and a pay
+  // period), so the tag lets the gate below reject the stale pair in the
+  // same render rather than one effect later.
+  const [bounds, setBounds] = useState(() => ({
     start: startMonth,
     end: startMonth,
-  });
+    configKey: payPeriodConfigKey(payPeriodConfig),
+  }));
   const [budgetType = 'envelope'] = useSyncedPref('budgetType');
   const [maxMonthsPref] = useGlobalPref('maxMonths');
   const maxMonths = maxMonthsPref || 1;
@@ -56,10 +80,50 @@ export function Budget() {
   const { data: { grouped: categoryGroups } = { grouped: [] } } =
     useCategories();
 
+  // A bounds response is only allowed to land if the cadence it was
+  // requested under is still the active one — a response from before a
+  // cadence change would otherwise overwrite the fresh bounds with a stale
+  // tag, closing the render gate below with nothing left to reopen it.
+  // The registry is the live source of the active cadence, updated during
+  // render by usePayPeriodConfigSync.
+  //
+  // Matching keys are still not enough: the server can flip cadence while
+  // the request is in flight (a change synced from another device, or an
+  // undo) and answer with the rebuilt bounds before this client hears
+  // about the change. In that window both keys agree on the old cadence
+  // but the values belong to the new one, and letting them through mixes
+  // month kinds in the table. The value check drops that response; the
+  // pending config-changed announcement re-runs init with a matching pair.
+  const applyBoundsIfCurrent = (
+    requestedConfig: PayPeriodConfig | null,
+    start: string,
+    end: string,
+  ) => {
+    const requestedConfigKey = payPeriodConfigKey(requestedConfig);
+    if (requestedConfigKey !== payPeriodConfigKey(getPayPeriodConfig())) {
+      return;
+    }
+    if (isPayPeriod(start) !== (requestedConfig != null)) {
+      return;
+    }
+    setBounds(prev =>
+      prev.start !== start ||
+      prev.end !== end ||
+      prev.configKey !== requestedConfigKey
+        ? { start, end, configKey: requestedConfigKey }
+        : prev,
+    );
+  };
+
   const init = useEffectEvent(() => {
     async function run() {
+      // Captured before the await: if the cadence changes again while this
+      // request is in flight, the bounds it returns describe the cadence
+      // that was active when it was sent, not the one active when it
+      // resolves.
+      const requestedConfig = payPeriodConfig;
       const { start, end } = await send('get-budget-bounds');
-      setBounds({ start, end });
+      applyBoundsIfCurrent(requestedConfig, start, end);
 
       await prewarmAllMonths(
         budgetType,
@@ -71,16 +135,45 @@ export function Budget() {
       setInitialized(true);
     }
 
-    void run();
+    void run().catch(error => {
+      console.error('Failed to initialize the budget view', error);
+      // Degrade to a single-column view in the active cadence rather than
+      // an unrecoverable spinner: without bounds in the current mode the
+      // gate below never opens, and nothing else re-runs init.
+      const currentKey = payPeriodConfigKey(getPayPeriodConfig());
+      const fallbackMonth = monthUtils.currentBudgetMonth();
+      setBounds({
+        start: fallbackMonth,
+        end: fallbackMonth,
+        configKey: currentKey,
+      });
+      setInitialized(true);
+    });
   });
-  useEffect(() => init(), []);
+
+  // The bounds and the prewarmed cells are expressed in the units of the
+  // active budget cadence (calendar months or pay period IDs), so both go
+  // stale when the pay period configuration changes. That normally happens
+  // on the settings route (this page is unmounted), but a change synced
+  // from another device — or an undo — can land while the budget is on
+  // screen, so re-run the initialization and re-gate the table on it.
+  const configKey = payPeriodConfigKey(payPeriodConfig);
+  useEffect(() => {
+    setInitialized(false);
+    init();
+  }, [configKey]);
 
   const loadBoundBudgets = useEffectEvent(() => {
-    void send('get-budget-bounds').then(({ start, end }) => {
-      if (bounds.start !== start || bounds.end !== end) {
-        setBounds({ start, end });
-      }
-    });
+    const requestedConfig = payPeriodConfig;
+    void send('get-budget-bounds')
+      .then(({ start, end }) => {
+        applyBoundsIfCurrent(requestedConfig, start, end);
+      })
+      .catch(error => {
+        // Refreshing the bounds is an optimization; the init() bounds are
+        // already in place, so a failed refresh is not fatal.
+        console.error('Failed to refresh budget bounds', error);
+      });
   });
   useEffect(() => loadBoundBudgets(), []);
 
@@ -131,15 +224,37 @@ export function Budget() {
   };
 
   const onShowActivity = (categoryId, month) => {
+    // Pay periods don't line up with calendar months, so filter by the
+    // period's actual day range instead of the `month` shorthand.
+    const dateFilter = getPayPeriodDateFilter(month, payPeriodConfig);
+    const dateConditions =
+      '$gte' in dateFilter
+        ? [
+            {
+              field: 'date',
+              op: 'gte',
+              value: dateFilter.$gte,
+              type: 'date',
+            },
+            {
+              field: 'date',
+              op: 'lte',
+              value: dateFilter.$lte,
+              type: 'date',
+            },
+          ]
+        : [
+            {
+              field: 'date',
+              op: 'is',
+              value: month,
+              options: { month: true },
+              type: 'date',
+            },
+          ];
     const filterConditions = [
       { field: 'category', op: 'is', value: categoryId, type: 'id' },
-      {
-        field: 'date',
-        op: 'is',
-        value: month,
-        options: { month: true },
-        type: 'date',
-      },
+      ...dateConditions,
     ];
     void navigate('/accounts', {
       state: {
@@ -175,8 +290,20 @@ export function Budget() {
     applyBudgetAction.mutate({ month, type, args });
   };
 
-  if (!initialized || !categoryGroups) {
-    return null;
+  // `bounds.configKey !== configKey` catches the render where the cadence
+  // has already flipped but the refetched bounds haven't arrived yet.
+  if (!initialized || bounds.configKey !== configKey || !categoryGroups) {
+    return (
+      <View
+        style={{
+          ...styles.page,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <AnimatedLoading width={25} height={25} />
+      </View>
+    );
   }
 
   let table;

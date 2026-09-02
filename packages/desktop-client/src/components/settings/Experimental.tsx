@@ -208,6 +208,9 @@ export function ExperimentalFeatures() {
             >
               <Trans>Mobile calculator</Trans>
             </FeatureToggle>
+            <FeatureToggle flag="payPeriodsEnabled">
+              <Trans>Pay periods</Trans>
+            </FeatureToggle>
             <FeatureToggle
               flag="sankeyReport"
               feedbackLink="https://github.com/actualbudget/actual/issues/1919"

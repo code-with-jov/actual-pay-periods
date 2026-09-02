@@ -1,6 +1,10 @@
 import * as asyncStorage from '#platform/server/asyncStorage';
 import * as fs from '#platform/server/fs';
 import { createApp } from '#server/app';
+import {
+  isPayPeriodPref,
+  refreshPayPeriodConfig,
+} from '#server/budget/pay-period-config';
 import * as db from '#server/db';
 import { PostError } from '#server/errors';
 import { resetFormulaPreferencesCache } from '#server/formulas/bootstrap';
@@ -62,6 +66,13 @@ async function saveSyncedPrefs({
 
   if (FORMULA_FORMAT_SYNCED_PREFS.has(id)) {
     resetFormulaPreferencesCache();
+  }
+
+  // A locally saved pay period preference must refresh the registry (and
+  // rebuild the budget sheets when the active config changed). Changes
+  // arriving from other devices are handled in server/sync (applyMessages).
+  if (isPayPeriodPref(id)) {
+    await refreshPayPeriodConfig();
   }
 }
 

@@ -1,5 +1,25 @@
 import * as monthUtils from '@actual-app/core/shared/months';
+import { payPeriodsActive } from '@actual-app/core/shared/pay-period-config';
 import type { SpendingAverageRange } from '@actual-app/core/types/models';
+
+export type SpendingReportMode = 'single-month' | 'budget' | 'average';
+
+/**
+ * The Spending report's "Budgeted" mode reads budgeted amounts keyed by
+ * calendar month, and no calendar-month budget exists while budgeting by
+ * pay period — the query comes back empty and the line plots as a flat
+ * zero. Everything else in this report is built from transactions and is
+ * unaffected, so fall back to the single-month comparison rather than
+ * blanking the whole report.
+ */
+export function resolveSpendingReportMode(
+  mode: SpendingReportMode | undefined,
+): SpendingReportMode {
+  if (mode === 'budget' && payPeriodsActive()) {
+    return 'single-month';
+  }
+  return mode ?? 'single-month';
+}
 
 export type SpendingAverageRangeKey =
   | 'last-3-months'

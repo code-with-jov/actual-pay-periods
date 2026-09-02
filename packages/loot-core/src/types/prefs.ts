@@ -11,6 +11,7 @@ export type FeatureFlag =
   | 'sankeyReport'
   | 'akahuBankSync'
   | 'mobileCalculator'
+  | 'payPeriodsEnabled'
   | 'monteCarloReport';
 
 /**
@@ -65,7 +66,10 @@ export type SyncedPrefs = Partial<
     | `flip-amount-${string}-${'csv' | 'qif'}`
     | `flags.${FeatureFlag}`
     | `learn-categories`
-    | `show-hidden-tags`,
+    | `show-hidden-tags`
+    | 'showPayPeriods'
+    | 'payPeriodFrequency'
+    | 'payPeriodStartDate',
     string
   >
 >;

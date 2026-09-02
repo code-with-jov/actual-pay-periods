@@ -1,3 +1,5 @@
+import { getPayPeriodConfig } from '@actual-app/core/shared/pay-period-config';
+import { getPayPeriodDateFilter } from '@actual-app/core/shared/pay-periods';
 import { q } from '@actual-app/core/shared/query';
 import type {
   AccountEntity,
@@ -85,6 +87,15 @@ export function closedAccountBalance() {
   } satisfies Binding<'account', 'closed-accounts-balance'>;
 }
 
+// A budget column is a calendar month or, when pay periods are active, a
+// pay period whose day range doesn't line up with any month — so the
+// `$month` transform can never match a pay period ID. Bindings aren't
+// React, so the active config comes from the shared registry rather than
+// the usePayPeriodConfig hook.
+function budgetMonthDateFilter(month: string) {
+  return getPayPeriodDateFilter(month, getPayPeriodConfig());
+}
+
 export function categoryBalance(
   categoryId: CategoryEntity['id'],
   month: string,
@@ -94,7 +105,7 @@ export function categoryBalance(
     query: q('transactions')
       .filter({
         category: categoryId,
-        date: { $transform: '$month', $eq: month },
+        date: budgetMonthDateFilter(month),
       })
       .options({ splits: 'inline' })
       .calculate({ $sum: '$amount' }),
@@ -110,7 +121,7 @@ export function categoryBalanceCleared(
     query: q('transactions')
       .filter({
         category: categoryId,
-        date: { $transform: '$month', $eq: month },
+        date: budgetMonthDateFilter(month),
         cleared: true,
       })
       .options({ splits: 'inline' })
@@ -127,7 +138,7 @@ export function categoryBalanceUncleared(
     query: q('transactions')
       .filter({
         category: categoryId,
-        date: { $transform: '$month', $eq: month },
+        date: budgetMonthDateFilter(month),
         cleared: false,
       })
       .options({ splits: 'inline' })

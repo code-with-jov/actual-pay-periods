@@ -52,6 +52,7 @@ import { useDashboardWidget } from '#hooks/useDashboardWidget';
 import { useFormatList } from '#hooks/useFormatList';
 import { useLocale } from '#hooks/useLocale';
 import { useNavigate } from '#hooks/useNavigate';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { useResizeObserver } from '#hooks/useResizeObserver';
 import { useRuleConditionFilters } from '#hooks/useRuleConditionFilters';
 import { addNotification } from '#notifications/notificationsSlice';
@@ -339,9 +340,14 @@ function LayerSelector({
 type GraphModeSelectorProps = {
   mode: GraphMode;
   onChange: (mode: GraphMode) => void;
+  budgetedDisabled?: boolean;
 };
 
-function GraphModeSelector({ mode, onChange }: GraphModeSelectorProps) {
+function GraphModeSelector({
+  mode,
+  onChange,
+  budgetedDisabled,
+}: GraphModeSelectorProps) {
   return (
     <SpaceBetween gap={5}>
       <ModeButton
@@ -357,6 +363,7 @@ function GraphModeSelector({ mode, onChange }: GraphModeSelectorProps) {
       </ModeButton>
       <ModeButton
         selected={mode === 'budgeted'}
+        isDisabled={budgetedDisabled}
         onSelect={() => {
           onChange('budgeted');
         }}
@@ -470,9 +477,19 @@ function SankeyInner({ widget }: SankeyInnerProps) {
   const [earliestTransaction, setEarliestTransaction] = useState('');
   const [latestTransaction, setLatestTransaction] = useState('');
 
+  // Budgeted amounts are keyed by calendar month and don't exist while
+  // budgeting by pay period — the per-month `api/budget-month` requests
+  // reject and the report would hang empty. Fall back to Spent, and snap
+  // back if the cadence flips on while this report is open.
+  const payPeriodsBlockBudgetedMode = usePayPeriodConfig() != null;
   const [graphMode, setGraphMode] = useState<GraphMode>(
-    widget?.meta?.mode ?? 'spent',
+    payPeriodsBlockBudgetedMode ? 'spent' : (widget?.meta?.mode ?? 'spent'),
   );
+  useEffect(() => {
+    if (payPeriodsBlockBudgetedMode) {
+      setGraphMode('spent');
+    }
+  }, [payPeriodsBlockBudgetedMode]);
 
   const [topNcategories, settopNcategories] = useState<number>(
     widget?.meta?.topNcategories ?? 15,
@@ -845,7 +862,11 @@ function SankeyInner({ widget }: SankeyInnerProps) {
                 backgroundColor: theme.pillBorderDark,
               }}
             />
-            <GraphModeSelector mode={graphMode} onChange={setGraphMode} />
+            <GraphModeSelector
+              mode={graphMode}
+              onChange={setGraphMode}
+              budgetedDisabled={payPeriodsBlockBudgetedMode}
+            />
             <View
               style={{
                 width: 1,

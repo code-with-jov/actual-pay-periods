@@ -1,7 +1,13 @@
 import { rangeInclusive } from '@actual-app/core/shared/months';
+import {
+  resetPayPeriodConfigForTesting,
+  setPayPeriodConfig,
+} from '@actual-app/core/shared/pay-period-config';
 import type { CategoryEntity } from '@actual-app/core/types/models';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  createBudgetAnalysisSpreadsheet,
   getLastSelectableMonth,
   getNextRunningBalance,
   isBaseCategory,
@@ -291,5 +297,31 @@ describe('createBudgetAnalysisSpreadsheet', () => {
 
       expect(runningBalance).toBe(0);
     });
+  });
+});
+
+describe('createBudgetAnalysisSpreadsheet while budgeting by pay period', () => {
+  afterEach(() => {
+    resetPayPeriodConfigForTesting();
+  });
+
+  it('leaves the data unset instead of charting empty calendar months', async () => {
+    setPayPeriodConfig({ payFrequency: 'biweekly', startDate: '2024-01-05' });
+
+    const setData = vi.fn();
+    const run = createBudgetAnalysisSpreadsheet({
+      startDate: '2024-01-01',
+      endDate: '2024-03-31',
+    });
+
+    // `send` and the spreadsheet are unmocked, so reaching either would
+    // fail: this asserts the report bails out before requesting a single
+    // calendar month's budget.
+    await run(
+      undefined as unknown as Parameters<typeof run>[0],
+      setData as unknown as Parameters<typeof run>[1],
+    );
+
+    expect(setData).not.toHaveBeenCalled();
   });
 });

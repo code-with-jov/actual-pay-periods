@@ -16,6 +16,7 @@ import type {
 } from '@actual-app/core/types/models';
 import type { SyncedPrefs } from '@actual-app/core/types/prefs';
 
+import { BudgetDataUnavailable } from '#components/reports/BudgetDataUnavailable';
 import { ChooseGraph } from '#components/reports/ChooseGraph';
 import { getLiveRange } from '#components/reports/getLiveRange';
 import { LoadingIndicator } from '#components/reports/LoadingIndicator';
@@ -24,6 +25,7 @@ import { createCustomSpreadsheet } from '#components/reports/spreadsheets/custom
 import { createGroupedSpreadsheet } from '#components/reports/spreadsheets/grouped-spreadsheet';
 import { useReport } from '#components/reports/useReport';
 import { useDateFormat } from '#hooks/useDateFormat';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { useSyncedPref } from '#hooks/useSyncedPref';
 
 function ErrorFallback() {
@@ -87,6 +89,7 @@ export function GetCardData({
   const { isNarrowWidth } = useResponsive();
   const [budgetType = 'envelope'] = useSyncedPref('budgetType');
   const dateFormat = useDateFormat() || 'MM/dd/yyyy';
+  const payPeriodConfig = usePayPeriodConfig();
 
   let startDate = report.startDate;
   let endDate = report.endDate;
@@ -183,6 +186,17 @@ export function GetCardData({
 
   const data =
     graphData && groupedData ? { ...graphData, groupedData } : graphData;
+
+  // A report saved with the Budgeted balance type reads budgeted amounts,
+  // which don't exist while budgeting by pay period — the query comes back
+  // empty and the card would render a well-formed chart of zeros with no
+  // hint that anything is wrong. Match BudgetAnalysisCard and say so.
+  const isBudgetDataUnavailable =
+    payPeriodConfig != null &&
+    ReportOptions.balanceTypeMap.get(report.balanceType) === 'totalBudgeted';
+  if (isBudgetDataUnavailable) {
+    return <BudgetDataUnavailable />;
+  }
 
   return data?.data ? (
     <ErrorBoundary FallbackComponent={ErrorFallback}>

@@ -28,6 +28,11 @@ import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import { send } from '@actual-app/core/platform/client/connection';
 import * as monthUtils from '@actual-app/core/shared/months';
+import { getPayPeriodConfig } from '@actual-app/core/shared/pay-period-config';
+import {
+  getPayPeriodLabel,
+  isPayPeriod,
+} from '@actual-app/core/shared/pay-periods';
 import { groupById } from '@actual-app/core/shared/util';
 import type { TransObjectLiteral } from '@actual-app/core/types/util';
 
@@ -54,10 +59,15 @@ import { useLocale } from '#hooks/useLocale';
 import { useLocalPref } from '#hooks/useLocalPref';
 import { useNavigate } from '#hooks/useNavigate';
 import { useOverspentCategories } from '#hooks/useOverspentCategories';
+import {
+  payPeriodConfigKey,
+  usePayPeriodConfig,
+} from '#hooks/usePayPeriodConfig';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useSheetValue } from '#hooks/useSheetValue';
 import { useSpreadsheet } from '#hooks/useSpreadsheet';
 import { useSyncedPref } from '#hooks/useSyncedPref';
+import { useTogglePayPeriods } from '#hooks/useTogglePayPeriods';
 import { useTransactions } from '#hooks/useTransactions';
 import { useUndo } from '#hooks/useUndo';
 import { collapseModals, pushModal } from '#modals/modalsSlice';
@@ -84,15 +94,31 @@ export function BudgetPage() {
   const budgetType = isBudgetType(budgetTypePref) ? budgetTypePref : 'envelope';
   const goalTemplatesEnabled = useFeatureFlag('goalTemplatesEnabled');
   const goalTemplatesUIEnabled = useFeatureFlag('goalTemplatesUIEnabled');
+  const isPayPeriodsEnabled = useFeatureFlag('payPeriodsEnabled');
+  const { payPeriodsActive, togglePayPeriods } = useTogglePayPeriods();
   const spreadsheet = useSpreadsheet();
 
-  const currMonth = monthUtils.currentMonth();
-  const [startMonth = currMonth, setStartMonthPref] =
-    useLocalPref('budget.startMonth');
-  const [monthBounds, setMonthBounds] = useState({
+  const currMonth = monthUtils.currentBudgetMonth();
+  const [startMonthPref, setStartMonthPref] = useLocalPref('budget.startMonth');
+  // The stored start month may belong to the other budgeting mode (e.g. a
+  // pay period ID persisted before pay periods were switched off) — fall
+  // back to the current budget month instead of crashing on it.
+  const startMonth = monthUtils.resolveStartMonth(startMonthPref, currMonth);
+  // Switching pay periods on or off moves `startMonth` between calendar
+  // months and period IDs, but changing only the cadence can leave it
+  // untouched ('2017-13' is a valid period under every frequency) — the
+  // bounds and prewarmed cells still go stale, so depend on the config too.
+  const payPeriodConfig = usePayPeriodConfig();
+  const configKey = payPeriodConfigKey(payPeriodConfig);
+  // Tagged with the cadence these bounds describe; see the same pattern on
+  // desktop (components/budget/index.tsx). Mobile only string-compares the
+  // bounds so a stale pair doesn't throw, but it does enable or disable the
+  // previous/next arrows against the wrong end of the budget.
+  const [monthBounds, setMonthBounds] = useState(() => ({
     start: startMonth,
     end: startMonth,
-  });
+    configKey,
+  }));
   // const [editMode, setEditMode] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const [_numberFormat] = useSyncedPref('numberFormat');
@@ -110,16 +136,42 @@ export function BudgetPage() {
 
   useEffect(() => {
     async function init() {
+      // Captured before the await; a cadence change while this request is
+      // in flight would otherwise mis-tag the bounds it returns. The
+      // registry (kept live by usePayPeriodConfigSync) is checked again on
+      // resolution so a response from before the change cannot overwrite
+      // the fresh bounds with a stale tag. The value check covers the
+      // other half of that race: the server can flip cadence mid-request
+      // and answer with the rebuilt bounds before this client hears about
+      // it, leaving both keys on the old cadence while the values belong
+      // to the new one (see the same guard in components/budget/index.tsx).
+      const requestedConfigKey = configKey;
       const { start, end } = await send('get-budget-bounds');
-      setMonthBounds({ start, end });
+      if (
+        requestedConfigKey === payPeriodConfigKey(getPayPeriodConfig()) &&
+        isPayPeriod(start) === (requestedConfigKey !== payPeriodConfigKey(null))
+      ) {
+        setMonthBounds({ start, end, configKey: requestedConfigKey });
+      }
 
       await prewarmMonth(budgetType, spreadsheet, startMonth);
 
       setInitialized(true);
     }
 
-    void init();
-  }, [budgetType, startMonth, dispatch, spreadsheet]);
+    void init().catch(error => {
+      console.error('Failed to initialize the mobile budget view', error);
+      // Show the single current column rather than an unrecoverable
+      // spinner; nothing else re-runs this effect.
+      const fallbackMonth = monthUtils.currentBudgetMonth();
+      setMonthBounds({
+        start: fallbackMonth,
+        end: fallbackMonth,
+        configKey: payPeriodConfigKey(getPayPeriodConfig()),
+      });
+      setInitialized(true);
+    });
+  }, [budgetType, startMonth, dispatch, spreadsheet, configKey]);
 
   const onBudgetAction = useCallback(
     async (month, type, args) => {
@@ -283,14 +335,14 @@ export function BudgetPage() {
   );
 
   const onPrevMonth = useCallback(async () => {
-    const month = monthUtils.subMonths(startMonth, 1);
+    const month = monthUtils.prevMonth(startMonth);
     await prewarmMonth(budgetType, spreadsheet, month);
     setStartMonthPref(month);
     setInitialized(true);
   }, [budgetType, setStartMonthPref, spreadsheet, startMonth]);
 
   const onNextMonth = useCallback(async () => {
-    const month = monthUtils.addMonths(startMonth, 1);
+    const month = monthUtils.nextMonth(startMonth);
     await prewarmMonth(budgetType, spreadsheet, month);
     setStartMonthPref(month);
     setInitialized(true);
@@ -485,7 +537,7 @@ export function BudgetPage() {
             name: 'notes',
             options: {
               id: `budget-${month}`,
-              name: monthUtils.format(month, "MMMM ''yy", locale),
+              name: monthUtils.nameForMonth(month, locale),
               onSave: onSaveNotes,
             },
           },
@@ -517,6 +569,13 @@ export function BudgetPage() {
     [budgetType, dispatch, onBudgetAction, onOpenBudgetMonthNotesModal],
   );
 
+  const onTogglePayPeriods = useCallback(() => {
+    // Close the menu first so the rebuild happens behind the budget page,
+    // not behind a stale modal.
+    dispatch(collapseModals({ rootModalName: 'budget-page-menu' }));
+    togglePayPeriods();
+  }, [dispatch, togglePayPeriods]);
+
   const onOpenBudgetPageMenu = useCallback(() => {
     dispatch(
       pushModal({
@@ -526,18 +585,29 @@ export function BudgetPage() {
             onAddCategoryGroup: onOpenNewCategoryGroupModal,
             onToggleHiddenCategories,
             onSwitchBudgetFile,
+            onTogglePayPeriods: isPayPeriodsEnabled
+              ? onTogglePayPeriods
+              : undefined,
+            payPeriodsActive: isPayPeriodsEnabled
+              ? payPeriodsActive
+              : undefined,
           },
         },
       }),
     );
   }, [
     dispatch,
+    isPayPeriodsEnabled,
     onOpenNewCategoryGroupModal,
     onSwitchBudgetFile,
     onToggleHiddenCategories,
+    onTogglePayPeriods,
+    payPeriodsActive,
   ]);
 
-  if (!categoryGroups || !initialized) {
+  // `monthBounds.configKey !== configKey` catches the render where the
+  // cadence has already flipped but the refetched bounds haven't landed.
+  if (!categoryGroups || !initialized || monthBounds.configKey !== configKey) {
     return (
       <View
         style={{
@@ -986,6 +1056,10 @@ function MonthSelector({
 }) {
   const locale = useLocale();
   const { t } = useTranslation();
+  const payPeriodConfig = usePayPeriodConfig();
+  const isPeriodMode = payPeriodConfig != null && isPayPeriod(month);
+  // Lexicographic comparison is valid for both calendar months and pay
+  // period IDs (both are 'YYYY-MM' within a single scheme).
   const prevEnabled = month > monthBounds.start;
   const nextEnabled = month < monthUtils.subMonths(monthBounds.end, 1);
 
@@ -1004,7 +1078,7 @@ function MonthSelector({
       }}
     >
       <Button
-        aria-label={t('Previous month')}
+        aria-label={isPeriodMode ? t('Previous period') : t('Previous month')}
         variant="bare"
         isDisabled={!prevEnabled}
         onPress={onPrevMonth}
@@ -1025,11 +1099,13 @@ function MonthSelector({
         data-month={month}
       >
         <Text style={styles.underlinedText}>
-          {monthUtils.format(month, "MMMM ''yy", locale)}
+          {isPeriodMode
+            ? getPayPeriodLabel(month, payPeriodConfig, 'short', locale)
+            : monthUtils.format(month, "MMMM ''yy", locale)}
         </Text>
       </Button>
       <Button
-        aria-label={t('Next month')}
+        aria-label={isPeriodMode ? t('Next period') : t('Next month')}
         variant="bare"
         isDisabled={!nextEnabled}
         onPress={onNextMonth}

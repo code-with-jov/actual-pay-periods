@@ -1942,7 +1942,10 @@ const Transaction = memo(function Transaction({
             }) => (
               <SheetNameProvider
                 name={monthUtils.sheetForMonth(
-                  monthUtils.monthFromDate(transaction.date),
+                  // The budget column owning this date, which is a pay
+                  // period rather than a calendar month when pay periods
+                  // are active.
+                  monthUtils.budgetMonthFromDate(transaction.date),
                 )}
               >
                 <CategoryAutocomplete

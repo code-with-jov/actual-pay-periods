@@ -35,6 +35,7 @@ import { ExperimentalFeatures } from './Experimental';
 import { ExportBudget } from './Export';
 import { FormatSettings } from './Format';
 import { LanguageSettings } from './LanguageSettings';
+import { PayPeriodSettings } from './PayPeriodSettings';
 import { RepairTransactions } from './RepairTransactions';
 import { ResetCache, ResetSync } from './Reset';
 import { ThemeSettings } from './Themes';
@@ -171,6 +172,7 @@ export function Settings() {
   const [budgetName] = useMetadataPref('budgetName');
   const dispatch = useDispatch();
   const isCurrencyExperimentalEnabled = useFeatureFlag('currency');
+  const isPayPeriodsExperimentalEnabled = useFeatureFlag('payPeriodsEnabled');
 
   const onCloseBudget = () => {
     void dispatch(closeBudget());
@@ -242,6 +244,7 @@ export function Settings() {
         <AuthSettings />
         <EncryptionSettings />
         <BudgetTypeSettings />
+        {isPayPeriodsExperimentalEnabled && <PayPeriodSettings />}
         {isElectron() && <Backups />}
         <ExportBudget />
         <AdvancedToggle>
