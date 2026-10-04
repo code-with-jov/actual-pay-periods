@@ -198,6 +198,7 @@ const sidebars = {
         },
         'settings/index',
         'custom-themes',
+        'notifications',
         {
           type: 'category',
           label: 'Experimental Features',
@@ -217,6 +218,7 @@ const sidebars = {
             'experimental/budget-analysis-report',
             'experimental/monte-carlo-analysis',
             'experimental/sankey-report',
+            'experimental/redesigned-sidebar',
           ],
         },
       ],
@@ -306,6 +308,7 @@ const sidebars = {
           items: [
             'troubleshooting/server',
             'troubleshooting/shared-array-buffer',
+            'troubleshooting/data-folder-access',
             'troubleshooting/reset_password',
             'troubleshooting/edge-browser',
           ],
