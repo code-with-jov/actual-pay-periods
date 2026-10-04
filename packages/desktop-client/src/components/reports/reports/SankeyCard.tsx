@@ -35,6 +35,7 @@ import type {
 import { useReport } from '#components/reports/useReport';
 import { useCategories } from '#hooks/useCategories';
 import { useLocale } from '#hooks/useLocale';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { useResizeObserver } from '#hooks/useResizeObserver';
 
 const defaultGetBaseGraph = async (
@@ -80,7 +81,11 @@ export function SankeyCard({
     undefined,
     latestTransaction,
   );
-  const mode = meta?.mode ?? 'spent';
+  // A widget saved in Budgeted mode has no data while budgeting by pay
+  // period (budgeted amounts are keyed by calendar month); fall back to
+  // Spent rather than issuing per-month requests that all reject.
+  const payPeriodConfig = usePayPeriodConfig();
+  const mode = payPeriodConfig != null ? 'spent' : (meta?.mode ?? 'spent');
 
   const [cardHeight, setCardHeight] = useState(0);
   const throttledSetCardHeight = useMemo(

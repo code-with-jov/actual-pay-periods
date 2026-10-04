@@ -575,6 +575,22 @@ describe('sheet language', () => {
     );
   });
 
+  it('applies every operator of a multi-operator condition', () => {
+    // A `{$gte, $lte}` range on one field must produce both bounds;
+    // dropping one silently widens the query (e.g. a pay period's
+    // drill-down showing transactions after the period's end).
+    const result = generateSQLWithState(
+      q('transactions')
+        .filter({ date: { $gte: '2020-01-06', $lte: '2020-01-19' } })
+        .select(['id'])
+        .serialize(),
+      basicSchema,
+    );
+    expect(result.sql).toMatch(
+      'WHERE ((transactions.date >= 20200106 AND transactions.date <= 20200119))',
+    );
+  });
+
   it('allows functions in `filter`', () => {
     // Allows transforming the input
     let result = generateSQLWithState(
@@ -889,8 +905,10 @@ describe('Type conversions', () => {
         .serialize(),
       schemaWithRefs,
     );
+    // The filter's own side compiles (and joins) first, so `trans1`
+    // becomes the first alias.
     expect(result.sql).toMatch(
-      'WHERE (CAST(SUBSTR(transactions2.date, 1, 6) AS integer) = CAST(SUBSTR(transactions1.date, 1, 6) AS integer))',
+      'WHERE (CAST(SUBSTR(transactions1.date, 1, 6) AS integer) = CAST(SUBSTR(transactions2.date, 1, 6) AS integer))',
     );
 
     // You can also specify a full date that is auto-converted to month
@@ -902,7 +920,7 @@ describe('Type conversions', () => {
       schemaWithRefs,
     );
     expect(result.sql).toMatch(
-      'WHERE (CAST(SUBSTR(transactions2.date, 1, 4) AS integer) = CAST(SUBSTR(transactions1.date, 1, 4) AS integer))',
+      'WHERE (CAST(SUBSTR(transactions1.date, 1, 4) AS integer) = CAST(SUBSTR(transactions2.date, 1, 4) AS integer))',
     );
   });
 

@@ -62,6 +62,20 @@ function makeSpreadsheet() {
       LRUValueCache.set(name, value);
     }
 
+    /**
+     * Drops every cached cell value. Needed when the meaning of a sheet
+     * name changes underneath us: pay period sheet names collide across
+     * cadences (`2026-13` exists under every frequency), so a value
+     * cached for the previous configuration would otherwise be rendered
+     * synchronously at bind time as if it were current.
+     */
+    clearCache(): void {
+      LRUValueCache.clear();
+      for (const name of Object.keys(cellCache)) {
+        delete cellCache[name];
+      }
+    }
+
     listen(): () => void {
       return listen('cells-changed', event => {
         if (!observersDisabled) {

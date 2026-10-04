@@ -464,7 +464,7 @@ function BudgetTableHeader({
       >
         {budgetType === 'tracking' ? (
           <Saved
-            projected={month >= monthUtils.currentMonth()}
+            projected={month >= monthUtils.currentBudgetMonth()}
             onPress={onShowBudgetSummary}
             show3Columns={show3Columns}
           />

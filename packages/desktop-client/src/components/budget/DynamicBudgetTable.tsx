@@ -11,6 +11,7 @@ import * as monthUtils from '@actual-app/core/shared/months';
 import { FeatureErrorFallback } from '#components/FeatureErrorFallback';
 import { useFeatureFlag } from '#hooks/useFeatureFlag';
 import { useGlobalPref } from '#hooks/useGlobalPref';
+import { useTogglePayPeriods } from '#hooks/useTogglePayPeriods';
 
 import { useBudgetMonthCount } from './BudgetMonthCountContext';
 import { BudgetPageHeader } from './BudgetPageHeader';
@@ -54,6 +55,9 @@ const DynamicBudgetTable = ({
   const { setDisplayMax } = useBudgetMonthCount();
   const [categoryExpandedStatePref] = useGlobalPref('categoryExpandedState');
   const isGoalTemplatesEnabled = useFeatureFlag('goalTemplatesEnabled');
+  const isPayPeriodsEnabled = useFeatureFlag('payPeriodsEnabled');
+  const { payPeriodsActive, isTogglingPayPeriods, togglePayPeriods } =
+    useTogglePayPeriods();
   const categoryExpandedState = categoryExpandedStatePref ?? 0;
 
   const numPossible = getNumPossibleMonths(
@@ -110,7 +114,7 @@ const DynamicBudgetTable = ({
     () => {
       _onMonthSelect(
         monthUtils.subMonths(
-          monthUtils.currentMonth(),
+          monthUtils.currentBudgetMonth(),
           type === 'envelope'
             ? Math.floor((numMonths - 1) / 2)
             : numMonths === 2
@@ -154,6 +158,13 @@ const DynamicBudgetTable = ({
             numMonths={numMonths}
             monthBounds={monthBounds}
             onMonthSelect={_onMonthSelect}
+            onTogglePayPeriods={
+              isPayPeriodsEnabled ? togglePayPeriods : undefined
+            }
+            payPeriodsActive={
+              isPayPeriodsEnabled ? payPeriodsActive : undefined
+            }
+            payPeriodsToggleDisabled={isTogglingPayPeriods}
           />
           <BudgetTable
             type={type}

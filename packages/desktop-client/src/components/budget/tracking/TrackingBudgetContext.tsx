@@ -35,7 +35,7 @@ export function TrackingBudgetProvider({
   onToggleSummaryCollapse,
   children,
 }: TrackingBudgetProviderProps) {
-  const currentMonth = monthUtils.currentMonth();
+  const currentMonth = monthUtils.currentBudgetMonth();
 
   return (
     <TrackingBudgetContext.Provider

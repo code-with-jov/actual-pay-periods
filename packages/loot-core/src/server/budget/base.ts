@@ -4,6 +4,7 @@ import * as sheet from '#server/sheet';
 import { resolveName } from '#server/spreadsheet/util';
 // @ts-strict-ignore
 import * as monthUtils from '#shared/months';
+import { payPeriodsActive } from '#shared/pay-period-config';
 import { q } from '#shared/query';
 import { getChangedValues } from '#shared/util';
 import type { CategoryGroupEntity } from '#types/models';
@@ -18,6 +19,34 @@ export function getBudgetType() {
 }
 
 export function getBudgetRange(start: string, end: string) {
+  if (payPeriodsActive()) {
+    // Budget columns are pay period IDs. Inputs can be days, calendar
+    // months, or period IDs; anchor each on its first day and apply the
+    // same semantic buffer as calendar mode (3 calendar months before the
+    // earliest needed date, 12 after the latest) in calendar space before
+    // resolving the containing periods by date containment.
+    let startDay = monthUtils.dayFromDate(start);
+    const endDay = monthUtils.dayFromDate(end);
+
+    // The start date should never be after the end date (see below).
+    if (startDay > endDay) {
+      startDay = endDay;
+    }
+
+    const startPeriod = monthUtils.budgetMonthFromDate(
+      monthUtils.subMonths(startDay, 3),
+    );
+    const endPeriod = monthUtils.budgetMonthFromDate(
+      monthUtils.addMonths(endDay, 12),
+    );
+
+    return {
+      start: startPeriod,
+      end: endPeriod,
+      range: monthUtils.rangeInclusive(startPeriod, endPeriod),
+    };
+  }
+
   start = monthUtils.getMonth(start);
   end = monthUtils.getMonth(end);
 
@@ -49,6 +78,37 @@ function getSumAmountsByMonth(
   rangeStart: number,
   rangeEnd: number,
 ): Map<string, number> {
+  if (payPeriodsActive()) {
+    // Pay periods don't line up with the `t.date / 100` calendar buckets
+    // (a period can even span a year boundary), so group by day and
+    // bucket each day into its containing period here instead.
+    const rows = db.runQuery<{
+      date: number;
+      category: string;
+      amount: number;
+    }>(
+      `SELECT t.category AS category,
+              t.date AS date,
+              SUM(t.amount) AS amount
+         FROM v_transactions_internal_alive t
+         LEFT JOIN accounts a ON a.id = t.account
+        WHERE t.date >= ? AND t.date <= ?
+          AND t.category IS NOT NULL
+          AND a.offbudget = 0
+        GROUP BY t.category, t.date`,
+      [rangeStart, rangeEnd],
+      true,
+    );
+
+    const sums = new Map<string, number>();
+    for (const row of rows) {
+      const period = monthUtils.budgetMonthFromDate(db.fromDateRepr(row.date));
+      const key = `${period.replace('-', '')}-${row.category}`;
+      sums.set(key, (sums.get(key) || 0) + (row.amount || 0));
+    }
+    return sums;
+  }
+
   const rows = db.runQuery<{ month: number; category: string; amount: number }>(
     `SELECT t.category AS category,
             t.date / 100 AS month,
@@ -130,7 +190,11 @@ function handleTransactionChange(transaction, changedFields) {
     transaction.date &&
     transaction.category
   ) {
-    const month = monthUtils.monthFromDate(db.fromDateRepr(transaction.date));
+    // Use the budget column (pay period or calendar month) that contains
+    // the transaction's date, not its calendar month.
+    const month = monthUtils.budgetMonthFromDate(
+      db.fromDateRepr(transaction.date),
+    );
     const sheetName = monthUtils.sheetForMonth(month);
 
     sheet
@@ -243,6 +307,12 @@ export function triggerBudgetChanges(oldValues, newValues) {
 }
 
 export async function doTransfer(categoryIds, transferId) {
+  // Only the active mode's budget columns are transferred: `createdMonths`
+  // holds calendar months or pay periods, never both, and only those have
+  // sheets to recompute. Money budgeted in the other mode's columns still
+  // makes the transfer prompt appear (see `isCategoryTransferRequired`), so
+  // it is never silently dropped, but moving it is left to the mode it
+  // belongs to.
   const { createdMonths: months } = sheet.get().meta();
 
   [...months].forEach(month => {
@@ -379,7 +449,9 @@ export async function createAllBudgets() {
   );
   const earliestDate =
     earliestTransaction && db.fromDateRepr(earliestTransaction.date);
-  const currentMonth = monthUtils.currentMonth();
+  // The budget column for "now": the current pay period when pay periods
+  // are active, otherwise the current calendar month.
+  const currentMonth = monthUtils.currentBudgetMonth();
 
   // Get the range based off of the earliest transaction and the
   // current month. If no transactions currently exist the current
@@ -400,14 +472,16 @@ export async function createAllBudgets() {
   return { start, end };
 }
 
-export async function setType(type) {
+// Deletes every budget sheet cell and rebuilds the budget sheets from the
+// database. Used whenever the shape of the budget columns changes: a
+// budget type switch (see `setType`) or a pay period configuration change
+// (see server/budget/pay-period-config.ts).
+export async function rebuildBudgets() {
   const meta = sheet.get().meta();
-  if (type === meta.budgetType) {
-    return;
-  }
-
-  meta.budgetType = type;
   meta.createdMonths = new Set();
+  // Force the envelope blank sheet to be recreated too; its static cells
+  // are deleted below along with the budget cells.
+  meta.blankSheet = null;
 
   // Go through and force all the cells to be recomputed
   const nodes = sheet.get().getNodes();
@@ -426,4 +500,14 @@ export async function setType(type) {
   sheet.get().endCacheBarrier();
 
   return bounds;
+}
+
+export async function setType(type) {
+  const meta = sheet.get().meta();
+  if (type === meta.budgetType) {
+    return;
+  }
+
+  meta.budgetType = type;
+  return rebuildBudgets();
 }

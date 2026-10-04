@@ -19,7 +19,9 @@ export class BudgetPage {
     this.budgetTable = page.getByTestId('budget-table');
     this.budgetTableTotals = this.budgetTable.getByTestId('budget-totals');
     this.selectedMonthButton = page.getByTestId('selected-budget-month');
-    this.nextMonthButton = page.getByTitle('Next month');
+    // MonthPicker titles this control 'Next period' while pay periods are
+    // active, so match either name.
+    this.nextMonthButton = page.getByTitle(/^Next (month|period)$/);
     this.budgetTableScrollContainer = page.getByTestId(
       'budget-table-scroll-container',
     );

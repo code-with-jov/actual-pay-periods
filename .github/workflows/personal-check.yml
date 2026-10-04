@@ -1,0 +1,105 @@
+name: Personal - Checks
+
+# Fork-local quality gate.
+#
+# Upstream's check.yml requests `depot-*` runners, which belong to the
+# actualbudget org's Depot account and never get picked up on this fork - every
+# run sits in `queued` forever. This is the same set of checks on GitHub-hosted
+# runners, which are free and unlimited because this repository is public.
+#
+# Named `personal-*` so that syncing from upstream never conflicts with it.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/develop' }}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          download-translations: 'false'
+      - name: Lint
+        run: yarn lint
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          download-translations: 'false'
+      - name: Typecheck
+        run: yarn typecheck
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          download-translations: 'false'
+      - name: Test
+        run: yarn test
+
+  constraints:
+    name: Constraints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          download-translations: 'false'
+      - name: Check dependency version consistency
+        run: yarn constraints
+      - name: Check tsconfig project references are in sync
+        run: yarn check:tsconfig-references
+
+  migrations:
+    name: Migrations
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          # check-migrations.ts compares against `origin/master`. Upstream gets
+          # away with the default depth-1 clone because their PRs target master,
+          # so the base tip is a parent of the PR merge commit and merge-base
+          # resolves inside the shallow graph. PRs here target `develop`, where
+          # master is unrelated in a shallow clone and `git merge-base
+          # origin/master HEAD` exits 1. Full history is the reliable fix.
+          fetch-depth: 0
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          download-translations: 'false'
+      - name: Check migrations
+        run: yarn workspace @actual-app/ci-actions tsx bin/check-migrations.ts

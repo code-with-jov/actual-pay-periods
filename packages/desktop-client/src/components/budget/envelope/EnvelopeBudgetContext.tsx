@@ -35,7 +35,7 @@ export function EnvelopeBudgetProvider({
   onToggleSummaryCollapse,
   children,
 }: EnvelopeBudgetProviderProps) {
-  const currentMonth = monthUtils.currentMonth();
+  const currentMonth = monthUtils.currentBudgetMonth();
 
   return (
     <EnvelopeBudgetContext.Provider

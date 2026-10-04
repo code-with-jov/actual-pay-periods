@@ -56,7 +56,13 @@ export function useCategoryScheduleGoalTemplateIndicator({
         return status === 'upcoming' || status === 'due' || status === 'missed';
       })
       .filter(schedule => {
-        if (monthUtils.monthFromDate(schedule.next_date) === month) {
+        // `month` is a budget column, which is a pay period rather than a
+        // calendar month while pay periods are active — so route the dates
+        // to their containing column instead of their calendar month, or
+        // the comparison never matches and the indicator disappears
+        // entirely. `budgetMonthFromDate` is the calendar month when pay
+        // periods are off.
+        if (monthUtils.budgetMonthFromDate(schedule.next_date) === month) {
           return true;
         }
 
@@ -64,7 +70,7 @@ export function useCategoryScheduleGoalTemplateIndicator({
           schedule.next_date,
           upcomingDays,
         );
-        return monthUtils.monthFromDate(indicatorStartDate) === month;
+        return monthUtils.budgetMonthFromDate(indicatorStartDate) === month;
       })
       .sort((a, b) => {
         // Display missed schedules first, then due, then upcoming.

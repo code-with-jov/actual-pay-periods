@@ -12,11 +12,16 @@ import { styles } from '@actual-app/components/styles';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import * as monthUtils from '@actual-app/core/shared/months';
+import {
+  getPayPeriodLabel,
+  isPayPeriod,
+} from '@actual-app/core/shared/pay-periods';
 import { css } from '@emotion/css';
 
 import { useEnvelopeBudget } from '#components/budget/envelope/EnvelopeBudgetContext';
 import { NotesButton } from '#components/NotesButton';
 import { useLocale } from '#hooks/useLocale';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useUndo } from '#hooks/useUndo';
 
@@ -48,17 +53,23 @@ export const BudgetSummary = memo(({ month }: BudgetSummaryProps) => {
     setMenuOpen(false);
   }
 
-  const prevMonthName = monthUtils.format(
-    monthUtils.prevMonth(month),
-    'MMM',
-    locale,
-  );
+  const payPeriodConfig = usePayPeriodConfig();
+
+  const prevMonth = monthUtils.prevMonth(month);
+  const prevMonthName =
+    payPeriodConfig && isPayPeriod(month)
+      ? getPayPeriodLabel(prevMonth, payPeriodConfig, 'short', locale)
+      : monthUtils.format(prevMonth, 'MMM', locale);
 
   const ExpandOrCollapseIcon = collapsed
     ? SvgArrowButtonDown1
     : SvgArrowButtonUp1;
 
-  const displayMonth = monthUtils.format(month, "MMMM ''yy", locale);
+  const displayMonth = monthUtils.nameForMonth(month, locale);
+  const monthTitle =
+    payPeriodConfig && isPayPeriod(month)
+      ? getPayPeriodLabel(month, payPeriodConfig, 'short', locale)
+      : monthUtils.format(month, 'MMMM', locale);
   const { t } = useTranslation();
 
   return (
@@ -133,7 +144,7 @@ export const BudgetSummary = memo(({ month }: BudgetSummaryProps) => {
               currentMonth === month && { fontWeight: 'bold' },
             ])}
           >
-            {monthUtils.format(month, 'MMMM', locale)}
+            {monthTitle}
           </div>
 
           <View

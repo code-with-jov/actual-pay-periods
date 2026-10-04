@@ -1,0 +1,147 @@
+name: Personal - Pi image
+
+# Builds the sync-server image for rocket-services (Raspberry Pi 3 Model B) and
+# publishes it to GHCR.
+#
+# armv7 ONLY. The Pi runs 32-bit Ubuntu 22.04 on a BCM2837, so arm64 images
+# cannot run on it at all - see the architecture gate in rocket-pi-3b's
+# reference/capacity.md. Building extra platforms would only burn QEMU minutes.
+#
+# Uses alpine.Dockerfile, not ubuntu.Dockerfile. Node.js stopped publishing
+# prebuilt armv7 binaries as of Node 24, so node:24-* has no linux/arm/v7
+# manifest and ubuntu.Dockerfile (FROM node:24-bookworm) can't build for this
+# platform anymore. alpine.Dockerfile sidesteps that by installing Node from
+# Alpine's own apk repo (`apk add nodejs`) instead of the upstream Node.js
+# binaries - this is the same split upstream's own docker-nightly.yml and
+# docker-release.yml use to keep publishing armv7/armv6 images.
+#
+# GHCR rather than Docker Hub: it authenticates with the built-in GITHUB_TOKEN,
+# so there are no registry secrets to create or rotate from an iPad.
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'packages/sync-server/**'
+      - 'packages/loot-core/**'
+      - 'packages/desktop-client/**'
+      - 'packages/crdt/**'
+      - 'yarn.lock'
+      - '.github/workflows/personal-pi-image.yml'
+  workflow_dispatch:
+    inputs:
+      skip_e2e:
+        description: 'Skip E2E and publish immediately (for iterating on the image build itself)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  # Deliberately not derived from github.workflow. A called reusable workflow
+  # sees the *caller's* github.workflow, so sharing that expression between
+  # this file and personal-e2e.yml would put the called job in the same group
+  # as the job waiting on it, and the run would deadlock.
+  group: personal-pi-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/actual-server
+
+jobs:
+  e2e:
+    name: E2E
+    if: ${{ !inputs.skip_e2e }}
+    uses: ./.github/workflows/personal-e2e.yml
+
+  publish:
+    name: Build and push (linux/arm/v7)
+    runs-on: ubuntu-latest
+    needs: e2e
+    # `needs` on a skipped job would skip this one too, so allow the
+    # skip_e2e escape hatch through explicitly.
+    if: ${{ always() && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Set up environment
+        uses: ./.github/actions/setup
+
+      # Building the bundle on the runner rather than inside the Dockerfile is
+      # upstream's approach (docker-nightly.yml): it builds once for every
+      # target platform and avoids yarn running out of memory under emulation.
+      - name: Build server bundle
+        run: yarn build:server
+
+      # Smoke-test natively first. A native amd64 build takes a couple of
+      # minutes, while the emulated armv7 build takes 20-40; there is no reason
+      # to discover a broken Dockerfile at the end of the slow one.
+      - name: Build image natively for smoke test
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          push: false
+          load: true
+          file: packages/sync-server/docker/alpine.Dockerfile
+          tags: actual-server-smoketest
+
+      - name: Check that the image boots
+        timeout-minutes: 2
+        run: |
+          docker run --detach --network=host --name smoketest actual-server-smoketest
+          HEALTHCMD=$(yq -r '.services.actual_server.healthcheck.test[1]' packages/sync-server/docker-compose.yml)
+          until docker exec smoketest sh -c "$HEALTHCMD"; do sleep 1; done
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker logs smoketest || true
+
+      # Reuses the layer cache from the smoke-test build where it can. The
+      # armv7 stage still compiles better-sqlite3 and bcrypt from source under
+      # QEMU (Alpine's node package has no prebuilt native modules), which is
+      # the slow part; type=gha caching keeps repeat builds tolerable.
+      - name: Build and push armv7 image
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          push: true
+          file: packages/sync-server/docker/alpine.Dockerfile
+          platforms: linux/arm/v7
+          tags: |
+            ${{ env.IMAGE }}:pi
+            ${{ env.IMAGE }}:pi-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### Pi image published"
+            echo
+            echo '```'
+            echo "docker pull ${IMAGE}:pi"
+            echo '```'
+            echo
+            echo "Rollback tag: \`${IMAGE}:pi-${SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/actual-server
+          SHA: ${{ github.sha }}

@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react';
 
 import * as monthUtils from '@actual-app/core/shared/months';
+import { isPayPeriod } from '@actual-app/core/shared/pay-periods';
 import type {
   CategoryEntity,
   ScheduleEntity,
@@ -35,7 +36,11 @@ export function useCategoryPreviewTransactions({
     () =>
       new Set(
         schedules
-          .filter(schedule => monthUtils.getMonth(schedule.next_date) === month)
+          .filter(schedule =>
+            isPayPeriod(month)
+              ? monthUtils.budgetMonthFromDate(schedule.next_date) === month
+              : monthUtils.getMonth(schedule.next_date) === month,
+          )
           .map(schedule => schedule.id),
       ),
     [month, schedules],

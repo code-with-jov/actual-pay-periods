@@ -562,6 +562,8 @@ export type Modal =
         onAddCategoryGroup: () => void;
         onToggleHiddenCategories: () => void;
         onSwitchBudgetFile: () => void;
+        onTogglePayPeriods?: () => void;
+        payPeriodsActive?: boolean;
       };
     }
   | {

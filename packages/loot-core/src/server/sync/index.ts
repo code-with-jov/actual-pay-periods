@@ -15,6 +15,10 @@ import {
   setType as setBudgetType,
   triggerBudgetChanges,
 } from '#server/budget/base';
+import {
+  isPayPeriodPref,
+  refreshPayPeriodConfig,
+} from '#server/budget/pay-period-config';
 import * as db from '#server/db';
 import { PostError, SyncError } from '#server/errors';
 import { app } from '#server/main-app';
@@ -426,6 +430,10 @@ async function _applyMessages(messages: Message[], deferUnknownSchema = false) {
   const idsPerTable: Record<string, string[]> = {};
   let oldData: DataMap = new Map();
   let newData: DataMap = new Map();
+  // Pay period preferences applied through sync (e.g. changed on another
+  // device) must refresh the registry after this transaction commits; see
+  // below.
+  let payPeriodPrefsChanged = false;
 
   // Everything that touches the database runs in one transaction: the
   // crdt lookup, reading the affected rows before and after, and the
@@ -507,6 +515,10 @@ async function _applyMessages(messages: Message[], deferUnknownSchema = false) {
             // which a rollback could not undo
             if (dataset === 'preferences' && row === 'budgetType') {
               budgetTypeToSet = value;
+            }
+
+            if (dataset === 'preferences' && isPayPeriodPref(row)) {
+              payPeriodPrefsChanged = true;
             }
           }
         } else {
@@ -603,6 +615,13 @@ async function _applyMessages(messages: Message[], deferUnknownSchema = false) {
     // Allow the cache to be used in the future. At this point it's guaranteed
     // to be up-to-date because we are done mutating any other data
     sheet.get().endCacheBarrier();
+  }
+
+  if (payPeriodPrefsChanged) {
+    // Runs after the messages are committed and the cache barrier above
+    // has ended: when the active pay period config changed, this rebuilds
+    // the budget sheets for the new mode.
+    await refreshPayPeriodConfig();
   }
 
   _syncListeners.forEach(func => func(oldData, newData));

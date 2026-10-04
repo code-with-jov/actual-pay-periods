@@ -6,15 +6,21 @@ import { useTranslation } from 'react-i18next';
 import {
   SvgCheveronLeft,
   SvgCheveronRight,
+  SvgLoadBalancer,
 } from '@actual-app/components/icons/v1';
 import { SvgCalendar } from '@actual-app/components/icons/v2';
 import { styles } from '@actual-app/components/styles';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import * as monthUtils from '@actual-app/core/shared/months';
+import {
+  getPayPeriodLabel,
+  isPayPeriod,
+} from '@actual-app/core/shared/pay-periods';
 
 import { Link } from '#components/common/Link';
 import { useLocale } from '#hooks/useLocale';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { useResizeObserver } from '#hooks/useResizeObserver';
 
 import type { MonthBounds } from './MonthsContext';
@@ -25,6 +31,9 @@ type MonthPickerProps = {
   monthBounds: MonthBounds;
   style: CSSProperties;
   onSelect: (month: string) => void;
+  onTogglePayPeriods?: () => void;
+  payPeriodsActive?: boolean;
+  payPeriodsToggleDisabled?: boolean;
 };
 
 export const MonthPicker = ({
@@ -33,13 +42,17 @@ export const MonthPicker = ({
   monthBounds,
   style,
   onSelect,
+  onTogglePayPeriods,
+  payPeriodsActive,
+  payPeriodsToggleDisabled,
 }: MonthPickerProps) => {
   const locale = useLocale();
   const { t } = useTranslation();
+  const payPeriodConfig = usePayPeriodConfig();
   const [hoverId, setHoverId] = useState(null);
   const [targetMonthCount, setTargetMonthCount] = useState(12);
 
-  const currentMonth = monthUtils.currentMonth();
+  const currentMonth = monthUtils.currentBudgetMonth();
   const firstSelectedMonth = startMonth;
 
   const lastSelectedMonth = monthUtils.addMonths(
@@ -90,6 +103,37 @@ export const MonthPicker = ({
           justifyContent: 'center',
         }}
       >
+        {onTogglePayPeriods && (
+          <Link
+            variant="button"
+            buttonVariant="bare"
+            aria-label={t('Toggle pay period budgeting')}
+            isDisabled={payPeriodsToggleDisabled}
+            onPress={onTogglePayPeriods}
+            style={{
+              padding: '3px 3px',
+              marginRight: '12px',
+            }}
+          >
+            <View
+              title={
+                payPeriodsActive
+                  ? t('Disable pay periods')
+                  : t('Enable pay periods')
+              }
+            >
+              <SvgLoadBalancer
+                style={{
+                  width: 16,
+                  height: 16,
+                  color: payPeriodsActive
+                    ? theme.pageTextPositive
+                    : theme.pageTextSubdued,
+                }}
+              />
+            </View>
+          </Link>
+        )}
         <Link
           variant="button"
           buttonVariant="bare"
@@ -117,7 +161,9 @@ export const MonthPicker = ({
             marginRight: '12px',
           }}
         >
-          <View title={t('Previous month')}>
+          <View
+            title={payPeriodConfig ? t('Previous period') : t('Previous month')}
+          >
             <SvgCheveronLeft
               style={{
                 width: 16,
@@ -127,7 +173,14 @@ export const MonthPicker = ({
           </View>
         </Link>
         {range.map((month, idx) => {
-          const monthName = monthUtils.format(month, 'MMM', locale);
+          const isPeriod = isPayPeriod(month);
+          // Pay period picker labels ('J1', 'J2', …) are already compact,
+          // so they are used at every size; calendar months keep the
+          // existing 'MMM' / first-letter behavior.
+          const monthName =
+            isPeriod && payPeriodConfig
+              ? getPayPeriodLabel(month, payPeriodConfig, 'picker', locale)
+              : monthUtils.format(month, 'MMM', locale);
           const selected =
             idx >= firstSelectedIndex && idx <= lastSelectedIndex;
 
@@ -135,7 +188,7 @@ export const MonthPicker = ({
           const hovered =
             hoverId === null ? false : idx >= hoverId && idx <= lastHoverId;
 
-          const current = currentMonth === month;
+          const current = monthUtils.isCurrentMonth(month);
           const year = monthUtils.getYear(month);
 
           let showYearHeader = false;
@@ -216,7 +269,7 @@ export const MonthPicker = ({
               onMouseLeave={() => setHoverId(null)}
             >
               <View>
-                {size === 'small' ? monthName[0] : monthName}
+                {size === 'small' && !isPeriod ? monthName[0] : monthName}
                 {showYearHeader && (
                   <View
                     style={{
@@ -246,7 +299,7 @@ export const MonthPicker = ({
             marginLeft: '12px',
           }}
         >
-          <View title={t('Next month')}>
+          <View title={payPeriodConfig ? t('Next period') : t('Next month')}>
             <SvgCheveronRight
               style={{
                 width: 16,

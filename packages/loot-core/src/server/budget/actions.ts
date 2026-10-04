@@ -7,6 +7,7 @@ import { batchMessages } from '#server/sync';
 import { getCurrency } from '#shared/currencies';
 import { getLocale } from '#shared/locale';
 import * as monthUtils from '#shared/months';
+import { payPeriodsActive } from '#shared/pay-period-config';
 import { integerToCurrency, safeNumber } from '#shared/util';
 import type { IntegerAmount } from '#shared/util';
 import type { CategoryEntity } from '#types/models';
@@ -54,6 +55,12 @@ export function isTrackingBudget(): boolean {
   const val = budgetType ? budgetType.value : 'envelope';
   return val === 'tracking';
 }
+
+// The `month` integer column of the budget tables encodes calendar months
+// as MM 01-12 and pay periods as MM 13-99 (see shared/pay-periods.ts), so
+// `month % 100` tells the two ID spaces apart.
+const FIRST_PAY_PERIOD_NUMBER = 13;
+const LAST_PAY_PERIOD_NUMBER = 99;
 
 function dbMonth(month: string): number {
   return parseInt(month.replace('-', ''));
@@ -150,6 +157,25 @@ export function setBudget({
     category,
     amount,
   });
+}
+
+/**
+ * Whether the category has any non-zero budgeted amount, in any budget
+ * column of either mode.
+ *
+ * Calendar months and pay periods share the budget table, but only the
+ * active mode's columns have spreadsheet sheets — so anything that walks
+ * the created months (or their sheets) is blind to money budgeted in the
+ * other mode. This reads the table directly so that money still counts.
+ */
+export async function hasBudgetedAmount(categoryId: string): Promise<boolean> {
+  const table = getBudgetTable();
+  const row = await db.first<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM ${table}
+      WHERE category = ? AND IFNULL(amount, 0) != 0`,
+    [categoryId],
+  );
+  return (row?.count ?? 0) > 0;
 }
 
 export function setGoal({ month, category, goal, long_goal }): Promise<void> {
@@ -445,8 +471,11 @@ async function getAverageMonths({
 function getAverageStartMonth(month: string): string {
   const prevMonth = monthUtils.prevMonth(month);
 
-  if (prevMonth >= monthUtils.currentMonth()) {
-    return monthUtils.prevMonth(monthUtils.currentMonth());
+  // "The current budget column": the current pay period when pay periods
+  // are active, otherwise the current calendar month.
+  const currentMonth = monthUtils.currentBudgetMonth();
+  if (prevMonth >= currentMonth) {
+    return monthUtils.prevMonth(currentMonth);
   }
 
   return prevMonth;
@@ -461,26 +490,50 @@ async function getFirstActivityMonth({
 }): Promise<string | null> {
   const table = getBudgetTable();
   const endDbMonth = dbMonth(endMonth);
-  const firstActivity = await db.first<{ month: number | null }>(
-    `SELECT MIN(month) AS month
-       FROM (
-         SELECT month
-           FROM ${table}
-          WHERE category = ? AND month <= ?
-         UNION ALL
-         SELECT CAST(t.date / 100 AS INTEGER) AS month
-           FROM v_transactions_internal_alive t
-           LEFT JOIN accounts a ON a.id = t.account
-          WHERE t.category = ?
-            AND CAST(t.date / 100 AS INTEGER) <= ?
-            AND a.offbudget = 0
-       )`,
-    [categoryId, endDbMonth, categoryId, endDbMonth],
+
+  // Both modes store their budget columns in the same `month` integer
+  // column (202601 for January 2026, 202613 for its first pay period), and
+  // calendar columns always sort below pay period ones. An unrestricted
+  // MIN() therefore hands back a column from the *other* mode, which
+  // callers then compare against columns of the active mode. Restrict the
+  // query to the ID space of the active mode.
+  const [minMonthNumber, maxMonthNumber] = payPeriodsActive()
+    ? [FIRST_PAY_PERIOD_NUMBER, LAST_PAY_PERIOD_NUMBER]
+    : [1, 12];
+  const firstBudget = await db.first<{ month: number | null }>(
+    `SELECT MIN(month) AS month FROM ${table}
+      WHERE category = ? AND month <= ? AND month % 100 BETWEEN ? AND ?`,
+    [categoryId, endDbMonth, minMonthNumber, maxMonthNumber],
   );
 
-  return firstActivity?.month == null
-    ? null
-    : monthFromDbMonth(firstActivity.month);
+  // Transactions are matched by date containment (through the end of
+  // `endMonth`) rather than by `t.date / 100`, because pay period budget
+  // columns don't line up with calendar-month date buckets.
+  const { end: endDay } = monthUtils.bounds(endMonth);
+  const firstTransaction = await db.first<{ date: number | null }>(
+    `SELECT MIN(t.date) AS date
+       FROM v_transactions_internal_alive t
+       LEFT JOIN accounts a ON a.id = t.account
+      WHERE t.category = ?
+        AND t.date <= ?
+        AND a.offbudget = 0`,
+    [categoryId, endDay],
+  );
+
+  const budgetMonth =
+    firstBudget?.month == null ? null : monthFromDbMonth(firstBudget.month);
+  const transactionMonth =
+    firstTransaction?.date == null
+      ? null
+      : monthUtils.budgetMonthFromDate(db.fromDateRepr(firstTransaction.date));
+
+  if (budgetMonth == null) {
+    return transactionMonth;
+  }
+  if (transactionMonth == null) {
+    return budgetMonth;
+  }
+  return budgetMonth < transactionMonth ? budgetMonth : transactionMonth;
 }
 
 export async function holdForNextMonth({

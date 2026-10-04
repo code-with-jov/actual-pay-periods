@@ -24,7 +24,13 @@ export function CategoryPage() {
 
   const { id: categoryIdParam } = useParams();
   const [searchParams] = useSearchParams();
-  const month = searchParams.get('month') || monthUtils.currentMonth();
+  // A month from the URL may belong to the other budgeting mode (e.g. a
+  // pay period ID from before pay periods were switched off) — fall back
+  // to the current budget month instead of crashing on it.
+  const month = monthUtils.resolveStartMonth(
+    searchParams.get('month') ?? undefined,
+    monthUtils.currentBudgetMonth(),
+  );
   const { data: category } = useCategory(categoryIdParam);
 
   return (
@@ -36,7 +42,7 @@ export function CategoryPage() {
               <View>
                 <TextOneLine>{category.name}</TextOneLine>
                 <TextOneLine>
-                  ({monthUtils.format(month, "MMMM ''yy", locale)})
+                  ({monthUtils.nameForMonth(month, locale)})
                 </TextOneLine>
               </View>
             ) : (

@@ -10,6 +10,7 @@ import type { BudgetAnalysisWidget } from '@actual-app/core/types/models';
 
 import { FinancialText } from '#components/FinancialText';
 import { PrivacyFilter } from '#components/PrivacyFilter';
+import { BudgetDataUnavailable } from '#components/reports/BudgetDataUnavailable';
 import { DateRange } from '#components/reports/DateRange';
 import { BudgetAnalysisGraph } from '#components/reports/graphs/BudgetAnalysisGraph';
 import { LoadingIndicator } from '#components/reports/LoadingIndicator';
@@ -19,6 +20,7 @@ import { calculateTimeRange } from '#components/reports/reportRanges';
 import { createBudgetAnalysisSpreadsheet } from '#components/reports/spreadsheets/budget-analysis-spreadsheet';
 import { useReport } from '#components/reports/useReport';
 import { useFormat } from '#hooks/useFormat';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 
 type BudgetAnalysisCardProps = {
   widgetId: string;
@@ -35,6 +37,9 @@ export function BudgetAnalysisCard({
 }: BudgetAnalysisCardProps) {
   const { t } = useTranslation();
   const format = useFormat();
+  // Budgeted amounts are kept per pay period rather than per calendar
+  // month, which is what this report charts.
+  const isBudgetDataUnavailable = usePayPeriodConfig() != null;
 
   const [isCardHovered, setIsCardHovered] = useState(false);
   const [nameMenuOpen, setNameMenuOpen] = useState(false);
@@ -106,7 +111,7 @@ export function BudgetAnalysisCard({
               end={monthUtils.getMonth(endDate)}
             />
           </View>
-          {data && (
+          {data && !isBudgetDataUnavailable && (
             <View style={{ textAlign: 'right' }}>
               <Block
                 style={{
@@ -125,7 +130,9 @@ export function BudgetAnalysisCard({
             </View>
           )}
         </View>
-        {data ? (
+        {isBudgetDataUnavailable ? (
+          <BudgetDataUnavailable />
+        ) : data ? (
           <BudgetAnalysisGraph
             style={{ flex: 1 }}
             data={data}

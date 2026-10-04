@@ -7,6 +7,10 @@ import {
   prevMonth,
   sheetForMonth,
 } from '@actual-app/core/shared/months';
+import {
+  getPayPeriodLabel,
+  isPayPeriod,
+} from '@actual-app/core/shared/pay-periods';
 import type { CategoryEntity } from '@actual-app/core/types/models/category';
 
 import { ToBudgetAmount } from '#components/budget/envelope/budgetsummary/ToBudgetAmount';
@@ -16,6 +20,7 @@ import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
 import { useCategoriesById } from '#hooks/useCategories';
 import { useFormat } from '#hooks/useFormat';
 import { useLocale } from '#hooks/useLocale';
+import { usePayPeriodConfig } from '#hooks/usePayPeriodConfig';
 import { SheetNameProvider } from '#hooks/useSheetName';
 import { useUndo } from '#hooks/useUndo';
 import { collapseModals, pushModal } from '#modals/modalsSlice';
@@ -37,7 +42,16 @@ export function EnvelopeBudgetSummaryModal({
 
   const locale = useLocale();
   const dispatch = useDispatch();
-  const prevMonthName = formatMonth(prevMonth(month), 'MMM', locale);
+  const payPeriodConfig = usePayPeriodConfig();
+  // "Leftover from Jan" is ambiguous when the previous budget column is a
+  // pay period — its start month is usually the same as the current one's,
+  // so show the period's date range instead (matching the desktop summary,
+  // budget/envelope/budgetsummary/BudgetSummary.tsx).
+  const previousMonth = prevMonth(month);
+  const prevMonthName =
+    payPeriodConfig && isPayPeriod(month)
+      ? getPayPeriodLabel(previousMonth, payPeriodConfig, 'short', locale)
+      : formatMonth(previousMonth, 'MMM', locale);
   const sheetValue =
     useEnvelopeSheetValue({
       name: envelopeBudget.toBudget,

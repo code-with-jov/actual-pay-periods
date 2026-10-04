@@ -71,6 +71,12 @@ type OrphanedPayeesEvent = {
   updatedPayeeIds: string[];
 };
 
+// The active pay period configuration changed server-side (a local save, a
+// change synced from another device or tab, or an undo). The client must
+// re-read the synced prefs so its own registry — and the budget columns it
+// derives from it — follow the new cadence.
+type PayPeriodConfigChangedEvent = undefined;
+
 export type ImportStep =
   | 'accounts'
   | 'categories'
@@ -114,6 +120,7 @@ export type ServerEvents = {
   'import-progress': ImportProgressEvent;
   'indexeddb-quota-error': IndexeddbQuotaErrorEvent;
   'orphaned-payees': OrphanedPayeesEvent;
+  'pay-period-config-changed': PayPeriodConfigChangedEvent;
   'prefs-updated': PrefsUpdatedEvent;
   'schedules-offline': SchedulesOfflineEvent;
   'server-error': ServerErrorEvent;
